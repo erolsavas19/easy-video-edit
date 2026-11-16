@@ -1,0 +1,8 @@
+asset:        easyvideoedit-256.png
+title:        Easy Video Edit app icon, 256 px render (window and taskbar icon)
+author:       Easy Video Edit contributors
+source:       original work (drawn in code: a gradient tile, a play triangle and a sparkle)
+license:      MIT OR Apache-2.0
+license-file: assets/app-icon/LICENSE.txt
+added:        2026-11-17 by erolsavas19
+notes:        Rendered with Pillow from a small drawing script; no third-party artwork.

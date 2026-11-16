@@ -3643,3 +3643,143 @@
 	Toggle Color Grading Section	Renk Derecelendirme Bölümünü Aç/Kapat
 	Color Grading Section	Renk Derecelendirme Bölümü
 	Read Video Scopes	Video Ölçümlerini Oku
+
+# Easy Video Edit: simple layout, galleries and templates
+	Elements	Öğeler
+	Intros	İntrolar
+	Back to Editing	Düzenlemeye Dön
+	Advanced Mode	Gelişmiş Mod
+	All panels and workspaces	Tüm paneller ve çalışma alanları
+	Simple Mode	Basit Mod
+	Back to the simple layout	Sade görünüme dön
+	Looks	Hazır Görünümler
+	Sound Settings	Ses Ayarları
+	Coming soon	Yakında
+	Double-click, or drag between two clips	Çift tıklayın ya da iki klibin arasına sürükleyin
+	Double-click, or drag onto a clip in the timeline	Çift tıklayın ya da zaman çizelgesindeki klibe sürükleyin
+	Double-click, or drag onto the timeline	Çift tıklayın ya da zaman çizelgesine sürükleyin
+	Other	Diğer
+	No results	Sonuç yok
+	Lower Third	Alt Bant
+	Social	Sosyal
+	Chapter Title	Bölüm Başlığı
+	Closing	Kapanış
+	Speech Bubble	Konuşma Balonu
+	Thought Bubble	Düşünce Balonu
+	Sticker	Çıkartma
+	Intro	İntro
+	Arrow	Ok
+	Face	Yüz
+	Quote	Alıntı
+	Simple	Sade
+	Boxed	Kutulu
+	Outlined	Konturlu
+	Cinema	Sinema
+	Gold	Altın
+	Hard Shadow	Kalın Gölge
+	Poster	Afiş
+	Headline	Manşet
+	Comic	Komik
+	Game	Oyun
+	Handwriting	El Yazısı
+	Brush	Fırça
+	Sweet	Tatlı
+	Sport	Spor
+	Classic	Klasik
+	Fun	Eğlenceli
+	Sign	Tabela
+	Elegant	Zarif
+	Military	Askeri
+	Button	Buton
+	Slide Up	Yukarı Kayma
+	Slide In	Soldan Gelme
+	Pop	Büyüme
+	Line Color	Çizgi Rengi
+	Face Color	Yüz Rengi
+	Bubble Color	Balon Rengi
+	Author	Yazar
+	Chapter	Bölüm
+	Call	Çağrı
+	Bar	Bant
+	Accent	Vurgu
+	Line	Çizgi
+	Element	Öğe
+	Left Eye	Sol Göz
+	Right Eye	Sağ Göz
+	Mouth	Ağız
+	Bubble	Balon
+	Tail	Kuyruk
+	Dot 1	Nokta 1
+	Dot 2	Nokta 2
+	Top Band	Üst Şerit
+	Bottom Band	Alt Şerit
+	Star 1	Yıldız 1
+	Star 2	Yıldız 2
+	Subtitle Styles	Altyazı Stilleri
+	Social Media	Sosyal Medya
+	Chapter Titles	Bölüm Başlıkları
+	Quotes	Alıntılar
+	Arrows	Oklar
+	Icons	Simgeler
+	Faces	Yüzler
+	Highlight · Circle	Vurgu · Daire
+	Highlight · Frame	Vurgu · Çerçeve
+	Highlight · Underline	Vurgu · Alt Çizgi
+	Highlight · Marker	Vurgu · Fosforlu Kalem
+	Stickers	Çıkartmalar
+	Orange	Turuncu
+	Right Bold	Sağa Kalın
+	Up	Yukarı
+	Down	Aşağı
+	Hand Right	El Sağa
+	Hand Left	El Sola
+	Hand Up	El Yukarı
+	Hand Down	El Aşağı
+	Check	Onay
+	Cross	Çarpı
+	Exclamation	Ünlem
+	Question	Soru
+	Like	Beğen
+	Dislike	Beğenme
+	Trophy	Kupa
+	Sun	Güneş
+	Cloud	Bulut
+	Umbrella	Şemsiye
+	Snowman	Kardan Adam
+	Music Note	Nota
+	Phone	Telefon
+	Plane	Uçak
+	Envelope	Zarf
+	Football	Futbol Topu
+	Scissors	Makas
+	Pencil	Kalem
+	Hourglass	Kum Saati
+	Flower	Çiçek
+	Sparkle	Parıltı
+	Recycle	Geri Dönüşüm
+	Smiling	Gülen
+	Sad	Üzgün
+	Surprised	Şaşkın
+	In Love	Âşık
+	Simple Black	Sade Siyah
+	Sunset	Gün Batımı
+	Neon Night	Neon Gece
+	Cinema Bars	Sinema Perdesi
+	Corporate	Kurumsal
+	Nature	Doğa
+	A large title in the middle.	Ortada büyük bir başlık.
+	An easy-to-read line at the bottom of the picture.	Görüntünün altında okunaklı bir satır.
+	A name and role on a coloured bar.	Renkli bir bant üzerinde ad ve unvan.
+	A name over a thin coloured line, the role under it.	İnce renkli bir çizginin üstünde ad, altında unvan.
+	A button that calls the viewer to act.	İzleyiciyi harekete geçiren bir düğme.
+	A small, eye-catching label in the corner.	Köşede dikkat çeken küçük bir etiket.
+	The chapter number and name.	Bölüm numarası ve adı.
+	A quotation in the middle and its author under it.	Ortada bir alıntı ve altında yazarı.
+	A card for the end of the video.	Videonun sonu için bir kart.
+	An element to put over the video.	Videonun üstüne eklenen bir öğe.
+	A ready-made opening for the start of the video; its text and colours can be changed.	Videonun başı için hazır bir açılış; yazılar ve renkler değiştirilebilir.
+	element	öğe
+	opening	açılış
+	Appear	Belirme
+	Outline Box	Çerçeve
+	Highlighter	Fosforlu Kalem

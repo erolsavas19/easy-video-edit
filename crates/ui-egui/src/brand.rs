@@ -1,8 +1,8 @@
-//! The ArtCraft wordmark (first-party trademark, used with permission; see `docs/brand/` and
-//! AGENTS.md §1.8), decoded once and kept as a texture.
+//! Easy Video Edit's mark (its app icon, `assets/app-icon/`), decoded once and kept as a texture.
+//! FilmCraft shows the ArtCraft wordmark here; a fork must not (AGENTS.md §1.8).
 
-const LOGO_LIGHT_INK: &[u8] = include_bytes!("../../../docs/brand/artcraft-logo-white.png");
-const LOGO_DARK_INK: &[u8] = include_bytes!("../../../docs/brand/artcraft-logo.png");
+const LOGO_LIGHT_INK: &[u8] = include_bytes!("../../../assets/app-icon/easyvideoedit-256.png");
+const LOGO_DARK_INK: &[u8] = include_bytes!("../../../assets/app-icon/easyvideoedit-256.png");
 
 /// The wordmark for a dark (`dark = true`) or light UI: light ink on dark themes. Its aspect
 /// ratio is width / height of the returned texture.

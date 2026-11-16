@@ -58,7 +58,7 @@ pub mod header;
 pub mod i18n;
 pub mod icons;
 mod ime_reset;
-/// VideoKurgu's simple layout over FilmCraft's panels.
+/// Easy Video Edit's simple layout over FilmCraft's panels.
 pub mod kurgu;
 pub mod links;
 pub mod menus;

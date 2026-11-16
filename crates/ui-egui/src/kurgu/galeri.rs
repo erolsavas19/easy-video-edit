@@ -1,4 +1,4 @@
-//! VideoKurgu's visual galleries: effects, transitions and color looks as cards with real
+//! Easy Video Edit's visual galleries: effects, transitions and color looks as cards with real
 //! previews rendered by FilmCraft's own engine (a transition plays while the pointer is over its
 //! card), favorites first, then groups. A double click applies the item to the selection; a drag
 //! drops it on the timeline, as in FilmCraft's Effects panel.
@@ -50,11 +50,7 @@ impl Source {
         matches!(self, Source::VideoTransitions | Source::AudioTransitions)
     }
     fn hint(self) -> &'static str {
-        if self.is_transition() {
-            "Çift tıklayın ya da iki klibin arasına sürükleyin"
-        } else {
-            "Çift tıklayın ya da zaman çizelgesindeki klibe sürükleyin"
-        }
+        if self.is_transition() { tl!("Double-click, or drag between two clips") } else { tl!("Double-click, or drag onto a clip in the timeline") }
     }
 }
 
@@ -101,7 +97,7 @@ pub fn effects(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, src: Sourc
         .map(|d| Card {
             key: d.id.to_string(),
             label: crate::i18n::t(d.name).to_string(),
-            group: crate::i18n::t(d.category.get(1).copied().unwrap_or("Diğer")).to_string(),
+            group: crate::i18n::t(d.category.get(1).copied().unwrap_or("Other")).to_string(),
         })
         .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q) || c.key.to_lowercase().contains(&q))
         .collect();
@@ -148,7 +144,7 @@ pub fn color_looks(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q))
         .collect();
     let mut renders = 0usize;
-    let action = grid(app, ui, body, &cards, "Çift tıklayın ya da zaman çizelgesindeki klibe sürükleyin", &mut |app, ui, card, r, _| {
+    let action = grid(app, ui, body, &cards, tl!("Double-click, or drag onto a clip in the timeline"), &mut |app, ui, card, r, _| {
         let name = format!("kurgu-look-{}", card.key);
         let tex = match app.texture_existing(&name) {
             Some((id, _)) => Some(id),
@@ -179,7 +175,7 @@ pub fn color_looks(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
-/// The text templates (FilmCraft's graphics template library, VideoKurgu's own first) as a
+/// The text templates (FilmCraft's graphics template library, Easy Video Edit's own first) as a
 /// gallery: each card shows the template over the sample picture and plays its intro on hover.
 /// Which part of the template library a gallery shows.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -216,9 +212,9 @@ pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, lib: Library
     let q = app.ui.kurgu.search.trim().to_lowercase();
     let library = template_library(app, ui.ctx());
     let mut ordered: Vec<&filmcraft_engine::graphic_templates::LibraryEntry> = library.iter().filter(|e| lib.includes(&e.template.id)).collect();
-    // VideoKurgu's templates first, then FilmCraft's built-in ones, then the user's own.
+    // Easy Video Edit's templates first, then FilmCraft's built-in ones, then the user's own.
     ordered.sort_by_key(|e| {
-        if e.template.id.starts_with("videokurgu:") {
+        if e.template.id.starts_with("easyvideoedit:") {
             0
         } else if e.path.is_none() {
             1
@@ -228,17 +224,14 @@ pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, lib: Library
     });
     let cards: Vec<Card> = ordered
         .iter()
-        .map(|e| Card {
-            key: e.template.id.clone(),
-            label: crate::i18n::t(&e.template.name).to_string(),
-            group: crate::i18n::t(&e.template.category).to_string(),
-        })
+        .map(|e| Card { key: e.template.id.clone(), label: translate_parts(&e.template.name), group: translate_parts(&e.template.category) })
         .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q) || c.group.to_lowercase().contains(&q))
         .collect();
     let mut renders = 0usize;
-    let action = grid(app, ui, body, &cards, "Çift tıklayın ya da zaman çizelgesine sürükleyin", &mut |app, ui, card, r, hovered| {
+    let action = grid(app, ui, body, &cards, tl!("Double-click, or drag onto the timeline"), &mut |app, ui, card, r, hovered| {
         let step = text_step(ui, hovered);
-        let name = format!("kurgu-tpl-{}-{step}", card.key);
+        // the language is in the name: the sample text of a template follows it
+        let name = format!("kurgu-tpl-{}-{}-{step}", card.key, crate::i18n::current().bcp47());
         let tex = match app.texture_existing(&name) {
             Some((id, _)) => Some(id),
             None if renders < RENDERS_PER_FRAME => {
@@ -267,11 +260,16 @@ pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, lib: Library
     }
 }
 
+/// A name made of parts ("Title · Simple · Fade"), translated part by part.
+fn translate_parts(name: &str) -> String {
+    name.split(" · ").map(crate::i18n::t).collect::<Vec<_>>().join(" · ")
+}
+
 /// The template library, read again at most every five seconds (user templates can be added
 /// while the app runs).
 fn template_library(app: &FilmcraftApp, ctx: &egui::Context) -> std::sync::Arc<Vec<filmcraft_engine::graphic_templates::LibraryEntry>> {
     type Lib = std::sync::Arc<Vec<filmcraft_engine::graphic_templates::LibraryEntry>>;
-    let id = egui::Id::unique("kurgu-template-library");
+    let id = egui::Id::unique(("kurgu-template-library", filmcraft_project::kurgu_templates::is_turkish()));
     let now = ctx.input(|i| i.time);
     if let Some((at, lib)) = ctx.data(|d| d.get_temp::<(f64, Lib)>(id))
         && now - at < 5.0
@@ -326,7 +324,7 @@ fn search(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) -> Rect {
     let sr = Rect::from_min_size(rect.min + vec2(10.0, 8.0), vec2((rect.width() - 20.0).max(40.0), 24.0));
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(sr).id_salt("kurgu-search"));
     let mut q = app.ui.kurgu.search.clone();
-    crate::widgets::search_field(&mut child, &mut q, "Ara", sr.width(), &t);
+    crate::widgets::search_field(&mut child, &mut q, tl!("Search"), sr.width(), &t);
     app.ui.kurgu.search = q;
     Rect::from_min_max(pos2(rect.min.x, sr.max.y + 6.0), rect.max)
 }
@@ -348,7 +346,7 @@ fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], h
     let mut gui = ui.new_child(egui::UiBuilder::new().max_rect(area).id_salt("kurgu-grid"));
     gui.set_clip_rect(area.intersect(ui.clip_rect()));
     if cards.is_empty() {
-        gui.painter().text(area.center(), Align2::CENTER_CENTER, "Sonuç yok", Tokens::ui(13.0), t.text_dim);
+        gui.painter().text(area.center(), Align2::CENTER_CENTER, tl!("No results"), Tokens::ui(13.0), t.text_dim);
         return None;
     }
     let favorites: Vec<&Card> = cards.iter().filter(|c| app.ui.kurgu.favorites.contains(&c.key)).collect();
@@ -380,7 +378,7 @@ fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], h
             }
         };
         if !favorites.is_empty() {
-            section(ui, app, "★ Favoriler", &favorites, "fav");
+            section(ui, app, &format!("★ {}", tl!("Favorites")), &favorites, "fav");
         }
         for g in &groups {
             let list: Vec<&Card> = cards.iter().filter(|c| c.group == *g).collect();
@@ -417,9 +415,9 @@ fn draw_card(app: &mut FilmcraftApp, ui: &mut egui::Ui, card: &Card, r: Rect, sa
     let mut star_clicked = false;
     if fav || hovered {
         let sresp = ui.interact(star, egui::Id::unique(("kurgu-star", salt, card.key.as_str())), Sense::click()).on_hover_text(if fav {
-            "Favorilerden çıkar"
+            tl!("Remove from Favorites")
         } else {
-            "Favorilere ekle"
+            tl!("Add to Favorites")
         });
         ui.painter().circle_filled(star.center(), 10.0, Color32::from_black_alpha(140));
         paint_star(ui.painter(), star.center(), 7.0, if fav { Color32::from_rgb(255, 200, 40) } else { Color32::from_gray(220) }, !fav);

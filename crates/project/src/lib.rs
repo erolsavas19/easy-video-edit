@@ -17,7 +17,7 @@ pub mod graphic;
 pub mod graphic_design;
 pub mod gtemplate;
 pub mod keyframe;
-/// VideoKurgu's generated text templates.
+/// Easy Video Edit's generated text templates.
 pub mod kurgu_templates;
 mod marker_color;
 pub use marker_color::HexColor;

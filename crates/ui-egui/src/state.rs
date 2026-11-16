@@ -487,7 +487,7 @@ pub struct UiState {
     /// The status bar (hints, messages, job progress). An app that embeds FilmCraft can hide it.
     #[serde(default = "shown")]
     pub show_status_bar: bool,
-    /// VideoKurgu's simple layout (on) or FilmCraft's workspaces (off, "Gelişmiş Mod").
+    /// Easy Video Edit's simple layout (on) or FilmCraft's workspaces (off, "Advanced Mode").
     #[serde(default)]
     pub kurgu: crate::kurgu::KurguState,
     pub dark: bool,

@@ -1,11 +1,11 @@
-//! VideoKurgu: a simple, visual layout over FilmCraft's engine and panels.
+//! Easy Video Edit: a simple, visual layout over FilmCraft's engine and panels.
 //!
 //! The window keeps one fixed arrangement instead of FilmCraft's dockable workspaces: a top bar,
 //! a rail of categories on the left (Media, Text, Transitions, Effects, Color, Audio, Voiceover,
 //! Elements, Intros, Tools), the chosen category's content next to it, one preview monitor in the
 //! middle, the selection's properties on the right and the timeline at the bottom. Each part is
 //! drawn by FilmCraft's own panel code (`panels::show`), so every feature keeps working; the
-//! dividers between the parts can be dragged. "Gelişmiş Mod" switches back to FilmCraft's full
+//! dividers between the parts can be dragged. "Advanced Mode" switches back to FilmCraft's full
 //! workspace layout.
 
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
@@ -19,7 +19,7 @@ use crate::theme::{ThemeKind, Tokens};
 
 mod galeri;
 
-/// Height of VideoKurgu's top bar (it takes the place of FilmCraft's header).
+/// Height of Easy Video Edit's top bar (it takes the place of FilmCraft's header).
 pub const TOP_BAR_H: f32 = 44.0;
 const RAIL_W: f32 = 76.0;
 const DIVIDER: f32 = 6.0;
@@ -56,16 +56,16 @@ impl Category {
 
     pub fn label(self) -> &'static str {
         match self {
-            Category::Media => "Medya",
-            Category::Text => "Yazılar",
-            Category::Transitions => "Geçişler",
-            Category::Effects => "Efektler",
-            Category::Color => "Renk",
-            Category::Audio => "Ses",
-            Category::Voiceover => "Seslendir",
-            Category::Elements => "Öğeler",
-            Category::Intros => "İntrolar",
-            Category::Tools => "Araçlar",
+            Category::Media => "Media",
+            Category::Text => "Text",
+            Category::Transitions => "Transitions",
+            Category::Effects => "Effects",
+            Category::Color => "Color",
+            Category::Audio => "Audio",
+            Category::Voiceover => "Voiceover",
+            Category::Elements => "Elements",
+            Category::Intros => "Intros",
+            Category::Tools => "Tools",
         }
     }
 
@@ -98,11 +98,11 @@ impl Category {
     }
 }
 
-/// VideoKurgu's layout state, saved with the rest of the UI state.
+/// Easy Video Edit's layout state, saved with the rest of the UI state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct KurguState {
-    /// VideoKurgu's layout is on; off shows FilmCraft's workspaces ("Gelişmiş Mod").
+    /// Easy Video Edit's layout is on; off shows FilmCraft's workspaces ("Advanced Mode").
     pub enabled: bool,
     pub category: Category,
     /// Width of the category content area (points).
@@ -148,38 +148,49 @@ pub fn top_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let p = ui.painter().clone();
     p.rect_filled(rect, 0.0, t.header_bg);
     p.line_segment([rect.left_bottom(), rect.right_bottom()], Stroke::new(1.0, t.separator));
-    // Name, with the accent on "Kurgu".
+    // Name, with the accent on "Easy".
     let x = rect.min.x + 16.0;
     let cy = rect.center().y;
-    let video = p.text(pos2(x, cy), Align2::LEFT_CENTER, "Video", Tokens::ui(17.0), t.text);
-    p.text(pos2(video.max.x, cy), Align2::LEFT_CENTER, "Kurgu", Tokens::ui(17.0), t.accent);
+    let easy = p.text(pos2(x, cy), Align2::LEFT_CENTER, "Easy", Tokens::ui(17.0), t.accent);
+    p.text(pos2(easy.max.x + 5.0, cy), Align2::LEFT_CENTER, "Video Edit", Tokens::ui(17.0), t.text);
 
     // Right side, from the right edge leftwards.
     let mut right = rect.max.x - 12.0;
-    let export_label = if app.ui.mode == Mode::Export { "Düzenlemeye Dön" } else { "Dışa Aktar" };
+    let export_label = if app.ui.mode == Mode::Export { tl!("Back to Editing") } else { tl!("Export") };
     if pill(ui, &t, &mut right, cy, export_label, true).clicked() {
         app.ui.mode = if app.ui.mode == Mode::Export { Mode::Edit } else { Mode::Export };
     }
-    if pill(ui, &t, &mut right, cy, "Gelişmiş Mod", false).on_hover_text("FilmCraft'ın tüm panelleri ve çalışma alanları").clicked() {
+    // Advanced Mode (FilmCraft's full layout) is a quiet icon, not one of the main buttons.
+    let adv = Rect::from_center_size(pos2(right - 14.0, cy), vec2(28.0, 28.0));
+    right -= 36.0;
+    let resp = ui
+        .interact(adv, egui::Id::unique("kurgu-advanced"), Sense::click())
+        .on_hover_text(format!("{}: {}", tl!("Advanced Mode"), tl!("All panels and workspaces")))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    if resp.hovered() {
+        ui.painter().rect_filled(adv, CornerRadius::same(6), t.hover);
+    }
+    icons::paint(ui.painter(), adv.shrink(6.0), Icon::Workspaces, if resp.hovered() { t.text } else { t.text_dim });
+    if resp.clicked() {
         app.ui.kurgu.enabled = false;
         app.ui.mode = Mode::Edit;
     }
     let light = app.tokens.kind == ThemeKind::Light;
-    let theme_label = if light { "Koyu Tema" } else { "Açık Tema" };
+    let theme_label = if light { tl!("Dark Theme") } else { tl!("Light Theme") };
     if pill(ui, &t, &mut right, cy, theme_label, false).clicked() {
         let ctx = ui.ctx().clone();
         crate::panels::settings::set_theme(app, &ctx, if light { ThemeKind::Dark } else { ThemeKind::Light });
     }
-    if app.ui.mode == Mode::Edit && pill(ui, &t, &mut right, cy, "İçe Aktar", false).clicked() {
+    if app.ui.mode == Mode::Edit && pill(ui, &t, &mut right, cy, tl!("Import"), false).clicked() {
         app.ui.mode = Mode::Import;
     }
-    if app.ui.mode == Mode::Import && pill(ui, &t, &mut right, cy, "Düzenlemeye Dön", false).clicked() {
+    if app.ui.mode == Mode::Import && pill(ui, &t, &mut right, cy, tl!("Back to Editing"), false).clicked() {
         app.ui.mode = Mode::Edit;
     }
 }
 
-/// In FilmCraft's full layout ("Gelişmiş Mod"): a "Basit Mod" button at the left of FilmCraft's
-/// header, which goes back to VideoKurgu's layout. Returns the header area left for FilmCraft.
+/// In FilmCraft's full layout ("Advanced Mode"): a "Simple Mode" button at the left of FilmCraft's
+/// header, which goes back to Easy Video Edit's layout. Returns the header area left for FilmCraft.
 pub fn simple_mode_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, header: Rect) -> Rect {
     let t = app.tokens;
     let w = 96.0;
@@ -189,8 +200,8 @@ pub fn simple_mode_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, header: Rec
     let resp = ui.interact(r, egui::Id::unique("kurgu-simple-mode"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
     let fill = if resp.hovered() { t.accent_hover } else { t.accent };
     ui.painter().rect_filled(r, CornerRadius::same(12), fill);
-    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Basit Mod", Tokens::ui(12.0), Color32::WHITE);
-    if resp.on_hover_text("VideoKurgu'nun sade görünümüne dön").clicked() {
+    ui.painter().text(r.center(), Align2::CENTER_CENTER, tl!("Simple Mode"), Tokens::ui(12.0), Color32::WHITE);
+    if resp.on_hover_text(tl!("Back to the simple layout")).clicked() {
         app.ui.kurgu.enabled = true;
         app.ui.mode = Mode::Edit;
     }
@@ -220,6 +231,8 @@ fn pill(ui: &mut egui::Ui, t: &Tokens, right: &mut f32, cy: f32, label: &str, pr
 
 /// The editing body: rail, category content, preview, properties and timeline.
 pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
+    // Templates are made with sample text in the interface language.
+    filmcraft_project::kurgu_templates::set_turkish(app.ui.language == crate::i18n::Language::Tr);
     let t = app.tokens;
     let rail = Rect::from_min_size(body.min, vec2(RAIL_W, body.height()));
     draw_rail(app, ui, rail);
@@ -243,7 +256,7 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     card(ui, &t, preview);
     panel(app, ui, PanelKind::Program, preview.shrink(1.0));
     card(ui, &t, props);
-    let props_inner = titled(ui, &t, props, "Özellikler");
+    let props_inner = titled(ui, &t, props, tl!("Properties"));
     panel(app, ui, PanelKind::Properties, props_inner);
     card(ui, &t, timeline);
     panel(app, ui, PanelKind::Timeline, timeline.shrink(1.0));
@@ -283,7 +296,13 @@ fn draw_rail(app: &mut FilmcraftApp, ui: &mut egui::Ui, rail: Rect) {
         let color = if active { t.accent } else { t.icon };
         let icon_rect = Rect::from_center_size(pos2(r.center().x, r.min.y + r.height() * 0.38), vec2(22.0, 22.0));
         icons::paint(p, icon_rect, cat.icon(), color);
-        p.text(pos2(r.center().x, r.max.y - 9.0), Align2::CENTER_CENTER, cat.label(), Tokens::ui(11.0), if active { t.text } else { t.text_dim });
+        p.text(
+            pos2(r.center().x, r.max.y - 9.0),
+            Align2::CENTER_CENTER,
+            crate::i18n::t(cat.label()),
+            Tokens::ui(11.0),
+            if active { t.text } else { t.text_dim },
+        );
         if resp.clicked() {
             select(app, cat);
         }
@@ -307,7 +326,7 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let t = app.tokens;
     card(ui, &t, rect);
     let cat = app.ui.kurgu.category;
-    let inner = titled(ui, &t, rect, cat.label());
+    let inner = titled(ui, &t, rect, crate::i18n::t(cat.label()));
     match cat {
         Category::Text => galeri::texts(app, ui, inner, galeri::Library::Texts),
         Category::Elements => galeri::texts(app, ui, inner, galeri::Library::Elements),
@@ -316,7 +335,7 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         Category::Effects => galeri::effects(app, ui, inner, galeri::Source::VideoEffects),
         Category::Color => {
             let mut tab = app.ui.kurgu.color_tab;
-            let body = galeri::tabs(ui, &t, inner, &["Hazır Görünümler", "Ayarla"], &mut tab);
+            let body = galeri::tabs(ui, &t, inner, &[tl!("Looks"), tl!("Adjust")], &mut tab);
             app.ui.kurgu.color_tab = tab;
             match tab {
                 0 => galeri::color_looks(app, ui, body),
@@ -325,7 +344,7 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         }
         Category::Audio => {
             let mut tab = app.ui.kurgu.audio_tab;
-            let body = galeri::tabs(ui, &t, inner, &["Efektler", "Geçişler", "Ses Ayarları"], &mut tab);
+            let body = galeri::tabs(ui, &t, inner, &[tl!("Effects"), tl!("Transitions"), tl!("Sound Settings")], &mut tab);
             app.ui.kurgu.audio_tab = tab;
             match tab {
                 0 => galeri::effects(app, ui, body, galeri::Source::AudioEffects),
@@ -342,12 +361,12 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
 
 fn coming_soon(ui: &mut egui::Ui, t: &Tokens, rect: Rect, cat: Category) {
     let text = match cat {
-        Category::Elements => "Emojiler, çıkartmalar, \"abone ol\" butonları ve süslemeler\nburada olacak.",
-        _ => "Renkleri, yazıları ve şekilleri düzenlenebilen\nhazır introlar burada olacak.",
+        Category::Elements => tl!("Coming soon"),
+        _ => tl!("Coming soon"),
     };
     let p = ui.painter();
     icons::paint(p, Rect::from_center_size(rect.center() - vec2(0.0, 40.0), vec2(40.0, 40.0)), cat.icon(), t.text_faint);
-    p.text(rect.center() + vec2(0.0, 10.0), Align2::CENTER_TOP, "Yakında", Tokens::ui(15.0), t.text);
+    p.text(rect.center() + vec2(0.0, 10.0), Align2::CENTER_TOP, tl!("Coming soon"), Tokens::ui(15.0), t.text);
     p.text(rect.center() + vec2(0.0, 34.0), Align2::CENTER_TOP, text, Tokens::ui(12.0), t.text_dim);
 }
 
