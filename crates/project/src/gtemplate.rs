@@ -703,6 +703,7 @@ pub fn builtin_templates() -> Vec<GraphicsTemplate> {
         t.graphic.roll = Roll { mode: RollMode::CrawlLeft, start_off_screen: true, end_off_screen: true, ..Default::default() };
         v.push(t);
     }
+    v.extend(crate::kurgu_templates::templates());
     v
 }
 

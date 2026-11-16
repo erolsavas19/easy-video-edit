@@ -179,6 +179,111 @@ pub fn color_looks(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     }
 }
 
+/// The text templates (FilmCraft's graphics template library, VideoKurgu's own first) as a
+/// gallery: each card shows the template over the sample picture and plays its intro on hover.
+pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
+    let body = search(app, ui, rect);
+    let q = app.ui.kurgu.search.trim().to_lowercase();
+    let library = template_library(app, ui.ctx());
+    let mut ordered: Vec<&filmcraft_engine::graphic_templates::LibraryEntry> = library.iter().collect();
+    // VideoKurgu's templates first, then FilmCraft's built-in ones, then the user's own.
+    ordered.sort_by_key(|e| {
+        if e.template.id.starts_with("videokurgu:") {
+            0
+        } else if e.path.is_none() {
+            1
+        } else {
+            2
+        }
+    });
+    let cards: Vec<Card> = ordered
+        .iter()
+        .map(|e| Card {
+            key: e.template.id.clone(),
+            label: crate::i18n::t(&e.template.name).to_string(),
+            group: crate::i18n::t(&e.template.category).to_string(),
+        })
+        .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q) || c.group.to_lowercase().contains(&q))
+        .collect();
+    let mut renders = 0usize;
+    let action = grid(app, ui, body, &cards, "Çift tıklayın ya da zaman çizelgesine sürükleyin", &mut |app, ui, card, r, hovered| {
+        let step = text_step(ui, hovered);
+        let name = format!("kurgu-tpl-{}-{step}", card.key);
+        let tex = match app.texture_existing(&name) {
+            Some((id, _)) => Some(id),
+            None if renders < RENDERS_PER_FRAME => {
+                renders += 1;
+                let entry = library.iter().find(|e| e.template.id == card.key);
+                entry.map(|e| render_template(&e.template, step)).map(|img| upload(app, ui.ctx(), &name, &img))
+            }
+            None => {
+                ui.ctx().request_repaint();
+                None
+            }
+        };
+        paint_thumb(ui, &app.tokens, r, tex);
+    });
+    match action {
+        Some(Action::Apply(key)) => {
+            if let Err(e) = app.session.execute("graphics.template.apply", json!({"template": key})) {
+                app.ui.status = e.to_string();
+            }
+        }
+        Some(Action::Drag(key)) => {
+            let name = library.iter().find(|e| e.template.id == key).map(|e| e.template.name.clone()).unwrap_or_default();
+            crate::panels::start_drag_template(ui, &key, &name);
+        }
+        None => {}
+    }
+}
+
+/// The template library, read again at most every five seconds (user templates can be added
+/// while the app runs).
+fn template_library(app: &FilmcraftApp, ctx: &egui::Context) -> std::sync::Arc<Vec<filmcraft_engine::graphic_templates::LibraryEntry>> {
+    type Lib = std::sync::Arc<Vec<filmcraft_engine::graphic_templates::LibraryEntry>>;
+    let id = egui::Id::unique("kurgu-template-library");
+    let now = ctx.input(|i| i.time);
+    if let Some((at, lib)) = ctx.data(|d| d.get_temp::<(f64, Lib)>(id))
+        && now - at < 5.0
+    {
+        return lib;
+    }
+    let lib: Lib = std::sync::Arc::new(filmcraft_engine::graphic_templates::library(&app.session));
+    ctx.data_mut(|d| d.insert_temp(id, (now, lib.clone())));
+    lib
+}
+
+/// Frames of a text template's hover animation (its intro, about one second).
+const TEXT_STEPS: usize = 10;
+
+/// The frame of a template's preview: settled at rest, the intro playing while hovered.
+fn text_step(ui: &egui::Ui, hovered: bool) -> usize {
+    if !hovered {
+        return TEXT_STEPS;
+    }
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(60));
+    let time = ui.input(|i| i.time);
+    let cycle = TEXT_STEPS + 8;
+    (((time * 12.0) as usize) % cycle).min(TEXT_STEPS)
+}
+
+/// Renders a template over the dimmed sample picture at frame `step` of its intro
+/// (`TEXT_STEPS` = settled, one second in).
+fn render_template(t: &filmcraft_project::gtemplate::GraphicsTemplate, step: usize) -> Image {
+    let mut img = lp::preview_image(THUMB_W, THUMB_H);
+    for (i, v) in img.px.iter_mut().enumerate() {
+        if i % 4 != 3 {
+            *v *= 0.55;
+        }
+    }
+    let secs = step.min(TEXT_STEPS) as f64 / TEXT_STEPS as f64;
+    let at = filmcraft_time::Tick((secs * filmcraft_time::TICKS_PER_SECOND as f64) as i64).min(t.duration);
+    let canvas = (t.canvas[0].max(1), t.canvas[1].max(1));
+    let k = (THUMB_W as f64 / canvas.0 as f64).min(THUMB_H as f64 / canvas.1 as f64);
+    filmcraft_render::graphic_clip::render_graphic_layers(&t.layers, at, canvas, &filmcraft_geom::Affine::scale(k, k), &mut img);
+    img
+}
+
 /// The search field at the top of a gallery; returns the area under it.
 fn search(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) -> Rect {
     let t = app.tokens;
