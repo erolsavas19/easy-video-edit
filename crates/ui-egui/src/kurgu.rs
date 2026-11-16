@@ -309,7 +309,9 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let cat = app.ui.kurgu.category;
     let inner = titled(ui, &t, rect, cat.label());
     match cat {
-        Category::Text => galeri::texts(app, ui, inner),
+        Category::Text => galeri::texts(app, ui, inner, galeri::Library::Texts),
+        Category::Elements => galeri::texts(app, ui, inner, galeri::Library::Elements),
+        Category::Intros => galeri::texts(app, ui, inner, galeri::Library::Intros),
         Category::Transitions => galeri::effects(app, ui, inner, galeri::Source::VideoTransitions),
         Category::Effects => galeri::effects(app, ui, inner, galeri::Source::VideoEffects),
         Category::Color => {

@@ -181,11 +181,41 @@ pub fn color_looks(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
 
 /// The text templates (FilmCraft's graphics template library, VideoKurgu's own first) as a
 /// gallery: each card shows the template over the sample picture and plays its intro on hover.
-pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
+/// Which part of the template library a gallery shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Library {
+    /// Text templates: titles, lower thirds, labels…
+    Texts,
+    /// Elements: arrows, icons, faces, bubbles, stickers.
+    Elements,
+    /// Intros: full-frame openings.
+    Intros,
+}
+
+impl Library {
+    fn includes(self, id: &str) -> bool {
+        use filmcraft_project::kurgu_templates::{ELEMENT_PREFIX, INTRO_PREFIX};
+        match self {
+            Library::Texts => !id.starts_with(ELEMENT_PREFIX) && !id.starts_with(INTRO_PREFIX),
+            Library::Elements => id.starts_with(ELEMENT_PREFIX),
+            Library::Intros => id.starts_with(INTRO_PREFIX),
+        }
+    }
+    /// How much a card enlarges the middle of the frame: elements are small in a full frame.
+    fn zoom(self) -> f64 {
+        if self == Library::Elements { 2.4 } else { 1.0 }
+    }
+    /// Seconds a card's animation covers: an intro's layers come in one after another.
+    fn span(self) -> f64 {
+        if self == Library::Intros { 2.0 } else { 1.0 }
+    }
+}
+
+pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, lib: Library) {
     let body = search(app, ui, rect);
     let q = app.ui.kurgu.search.trim().to_lowercase();
     let library = template_library(app, ui.ctx());
-    let mut ordered: Vec<&filmcraft_engine::graphic_templates::LibraryEntry> = library.iter().collect();
+    let mut ordered: Vec<&filmcraft_engine::graphic_templates::LibraryEntry> = library.iter().filter(|e| lib.includes(&e.template.id)).collect();
     // VideoKurgu's templates first, then FilmCraft's built-in ones, then the user's own.
     ordered.sort_by_key(|e| {
         if e.template.id.starts_with("videokurgu:") {
@@ -214,7 +244,7 @@ pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             None if renders < RENDERS_PER_FRAME => {
                 renders += 1;
                 let entry = library.iter().find(|e| e.template.id == card.key);
-                entry.map(|e| render_template(&e.template, step)).map(|img| upload(app, ui.ctx(), &name, &img))
+                entry.map(|e| render_template(&e.template, step, lib.zoom(), lib.span())).map(|img| upload(app, ui.ctx(), &name, &img))
             }
             None => {
                 ui.ctx().request_repaint();
@@ -269,18 +299,24 @@ fn text_step(ui: &egui::Ui, hovered: bool) -> usize {
 
 /// Renders a template over the dimmed sample picture at frame `step` of its intro
 /// (`TEXT_STEPS` = settled, one second in).
-fn render_template(t: &filmcraft_project::gtemplate::GraphicsTemplate, step: usize) -> Image {
+fn render_template(t: &filmcraft_project::gtemplate::GraphicsTemplate, step: usize, zoom: f64, span: f64) -> Image {
     let mut img = lp::preview_image(THUMB_W, THUMB_H);
     for (i, v) in img.px.iter_mut().enumerate() {
         if i % 4 != 3 {
             *v *= 0.55;
         }
     }
-    let secs = step.min(TEXT_STEPS) as f64 / TEXT_STEPS as f64;
+    let secs = step.min(TEXT_STEPS) as f64 / TEXT_STEPS as f64 * span;
     let at = filmcraft_time::Tick((secs * filmcraft_time::TICKS_PER_SECOND as f64) as i64).min(t.duration);
     let canvas = (t.canvas[0].max(1), t.canvas[1].max(1));
     let k = (THUMB_W as f64 / canvas.0 as f64).min(THUMB_H as f64 / canvas.1 as f64);
-    filmcraft_render::graphic_clip::render_graphic_layers(&t.layers, at, canvas, &filmcraft_geom::Affine::scale(k, k), &mut img);
+    // the middle of the canvas at the middle of the card, enlarged `zoom` times
+    let s = k * zoom.max(1.0);
+    // `a.then_apply(b)` applies `b` first: centre the canvas on the origin, scale, then move to the card's middle
+    let m = filmcraft_geom::Affine::translate(THUMB_W as f64 / 2.0, THUMB_H as f64 / 2.0)
+        .then_apply(&filmcraft_geom::Affine::scale(s, s))
+        .then_apply(&filmcraft_geom::Affine::translate(-(canvas.0 as f64) / 2.0, -(canvas.1 as f64) / 2.0));
+    filmcraft_render::graphic_clip::render_graphic_layers(&t.layers, at, canvas, &m, &mut img);
     img
 }
 
