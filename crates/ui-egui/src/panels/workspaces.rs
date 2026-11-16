@@ -13,7 +13,7 @@ use crate::menus::MenuItem;
 use crate::state::WorkspaceDialog;
 
 /// Command ids under `window.workspace.` that are not workspace names.
-const ACTIONS: [&str; 6] = ["reset", "saveChanges", "saveAs", "edit", "rename", "delete"];
+const ACTIONS: [&str; 7] = ["videokurgu", "reset", "saveChanges", "saveAs", "edit", "rename", "delete"];
 
 /// `window.workspace.*`: switch (`window.workspace.<name>`), `reset`, `saveChanges`,
 /// `saveAs {name?}` (no name: open the dialog), `edit`, `rename {from, to}`, `delete {name}`.
@@ -21,6 +21,12 @@ pub fn route(app: &mut FilmcraftApp, id: &str, params: &Value) -> Option<Result<
     let ws = id.strip_prefix("window.workspace.")?;
     let arg = |k: &str| params.get(k).and_then(Value::as_str).map(str::to_string);
     let r = match ws {
+        // VideoKurgu's simple layout, back from FilmCraft's workspaces ("Gelişmiş Mod").
+        "videokurgu" => {
+            app.ui.kurgu.enabled = true;
+            app.ui.mode = crate::state::Mode::Edit;
+            Ok(json!({"layout": "videokurgu"}))
+        }
         "reset" => {
             let n = app.ui.workspace.clone();
             app.set_workspace(&n);

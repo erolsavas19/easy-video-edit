@@ -59,14 +59,24 @@ impl FilmcraftApp {
             ui.ctx().set_cursor_icon(egui::CursorIcon::None);
             return;
         }
-        let header_h = if self.ui.show_header { header::HEIGHT } else { 0.0 };
+        let kurgu = self.ui.kurgu.enabled;
+        let header_h = if kurgu {
+            crate::kurgu::TOP_BAR_H
+        } else if self.ui.show_header {
+            header::HEIGHT
+        } else {
+            0.0
+        };
         let header = egui::Rect::from_min_size(full.min, egui::vec2(full.width(), header_h));
-        if self.ui.show_header {
+        if kurgu {
+            crate::kurgu::top_bar(self, ui, header);
+        } else if self.ui.show_header {
             header::show(self, ui, header);
         }
         let status_h = if self.ui.show_status_bar { 20.0 } else { 0.0 };
         let body = egui::Rect::from_min_max(egui::pos2(full.min.x + 1.0, header.max.y + 1.0), egui::pos2(full.max.x - 1.0, full.max.y - status_h - 2.0));
         match self.ui.mode {
+            state::Mode::Edit if kurgu => crate::kurgu::show(self, ui, body),
             state::Mode::Edit => self.dock_area(ui, body),
             state::Mode::Import => panels::import_mode::show(self, ui, body),
             state::Mode::Export => panels::export_mode::show(self, ui, body),

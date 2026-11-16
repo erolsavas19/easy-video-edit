@@ -487,6 +487,9 @@ pub struct UiState {
     /// The status bar (hints, messages, job progress). An app that embeds FilmCraft can hide it.
     #[serde(default = "shown")]
     pub show_status_bar: bool,
+    /// VideoKurgu's simple layout (on) or FilmCraft's workspaces (off, "Gelişmiş Mod").
+    #[serde(default)]
+    pub kurgu: crate::kurgu::KurguState,
     pub dark: bool,
     /// Color Grading scopes visible in the Program monitor area.
     pub show_scopes: bool,
@@ -1031,6 +1034,7 @@ impl Default for UiState {
             show_menu_bar: true,
             show_header: true,
             show_status_bar: true,
+            kurgu: Default::default(),
             dark: true,
             show_scopes: false,
             status: String::new(),

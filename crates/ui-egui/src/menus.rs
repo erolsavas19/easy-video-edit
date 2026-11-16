@@ -125,6 +125,7 @@ pub const UI_COMMANDS: &[UiCommand] = &[
     uic!("window.workspace.captionsandgraphics", "Captions and Graphics", ["Window", "Workspaces"], Some("Alt+Shift+6")),
     uic!("window.workspace.allpanels", "All Panels", ["Window", "Workspaces"], None),
     uic!("window.workspace.vertical", "Vertical", ["Window", "Workspaces"], None),
+    uic!("window.workspace.videokurgu", "VideoKurgu (Kolay Mod)", ["Window", "Workspaces"], Some("Alt+Shift+9")),
     uic!("window.workspace.reset", "Reset to Saved Layout", ["Window", "Workspaces"], Some("Alt+Shift+0")),
     uic!("window.workspace.saveChanges", "Save Changes to this Workspace", ["Window", "Workspaces"], None),
     uic!("window.workspace.saveAs", "Save as New Workspace…", ["Window", "Workspaces"], None),
