@@ -17,6 +17,8 @@ use crate::icons::{self, Icon};
 use crate::state::Mode;
 use crate::theme::{ThemeKind, Tokens};
 
+mod galeri;
+
 /// Height of VideoKurgu's top bar (it takes the place of FilmCraft's header).
 pub const TOP_BAR_H: f32 = 44.0;
 const RAIL_W: f32 = 76.0;
@@ -88,9 +90,7 @@ impl Category {
         match self {
             Category::Media => Some(PanelKind::Project),
             Category::Text => Some(PanelKind::EssentialGraphics),
-            Category::Transitions | Category::Effects => Some(PanelKind::Effects),
-            Category::Color => Some(PanelKind::LumetriColor),
-            Category::Audio => Some(PanelKind::EssentialSound),
+            Category::Transitions | Category::Effects | Category::Color | Category::Audio => None,
             Category::Voiceover => Some(PanelKind::TextToSpeech),
             Category::Tools => Some(PanelKind::EffectControls),
             Category::Elements | Category::Intros => None,
@@ -111,11 +111,34 @@ pub struct KurguState {
     pub props_w: f32,
     /// Share of the body height the timeline takes (0..1).
     pub timeline_share: f32,
+    /// Favorite effects, transitions (their ids) and color looks (`lumetri:<name>`).
+    pub favorites: Vec<String>,
+    /// The galleries' search text.
+    #[serde(skip)]
+    pub search: String,
+    /// The card selected last in a gallery.
+    #[serde(skip)]
+    pub selected: Option<String>,
+    /// Audio: Effects, Transitions or Sound settings.
+    pub audio_tab: u8,
+    /// Color: Looks or Adjust.
+    pub color_tab: u8,
 }
 
 impl Default for KurguState {
     fn default() -> Self {
-        KurguState { enabled: true, category: Category::Media, content_w: 340.0, props_w: 300.0, timeline_share: 0.36 }
+        KurguState {
+            enabled: true,
+            category: Category::Media,
+            content_w: 360.0,
+            props_w: 300.0,
+            timeline_share: 0.36,
+            favorites: Vec::new(),
+            search: String::new(),
+            selected: None,
+            audio_tab: 0,
+            color_tab: 0,
+        }
     }
 }
 
@@ -153,6 +176,25 @@ pub fn top_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     if app.ui.mode == Mode::Import && pill(ui, &t, &mut right, cy, "Düzenlemeye Dön", false).clicked() {
         app.ui.mode = Mode::Edit;
     }
+}
+
+/// In FilmCraft's full layout ("Gelişmiş Mod"): a "Basit Mod" button at the left of FilmCraft's
+/// header, which goes back to VideoKurgu's layout. Returns the header area left for FilmCraft.
+pub fn simple_mode_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, header: Rect) -> Rect {
+    let t = app.tokens;
+    let w = 96.0;
+    let strip = Rect::from_min_size(header.min, vec2(w + 12.0, header.height()));
+    ui.painter().rect_filled(strip, 0.0, t.header_bg);
+    let r = Rect::from_center_size(strip.center(), vec2(w, (header.height() - 10.0).max(20.0)));
+    let resp = ui.interact(r, egui::Id::unique("kurgu-simple-mode"), Sense::click()).on_hover_cursor(egui::CursorIcon::PointingHand);
+    let fill = if resp.hovered() { t.accent_hover } else { t.accent };
+    ui.painter().rect_filled(r, CornerRadius::same(12), fill);
+    ui.painter().text(r.center(), Align2::CENTER_CENTER, "Basit Mod", Tokens::ui(12.0), Color32::WHITE);
+    if resp.on_hover_text("VideoKurgu'nun sade görünümüne dön").clicked() {
+        app.ui.kurgu.enabled = true;
+        app.ui.mode = Mode::Edit;
+    }
+    Rect::from_min_max(pos2(strip.max.x, header.min.y), header.max)
 }
 
 /// A rounded button laid out right to left: draws it left of `right` and moves `right` past it.
@@ -252,10 +294,8 @@ fn draw_rail(app: &mut FilmcraftApp, ui: &mut egui::Ui, rail: Rect) {
 fn select(app: &mut FilmcraftApp, cat: Category) {
     let was = app.ui.kurgu.category;
     app.ui.kurgu.category = cat;
-    match cat {
-        Category::Transitions => app.ui.effects_search = "Transition".into(),
-        Category::Effects if was == Category::Transitions => app.ui.effects_search.clear(),
-        _ => {}
+    if was != cat {
+        app.ui.kurgu.search.clear();
     }
     if let Some(kind) = cat.panel() {
         app.ui.focused = kind;
@@ -268,9 +308,32 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     card(ui, &t, rect);
     let cat = app.ui.kurgu.category;
     let inner = titled(ui, &t, rect, cat.label());
-    match cat.panel() {
-        Some(kind) => panel(app, ui, kind, inner),
-        None => coming_soon(ui, &t, inner, cat),
+    match cat {
+        Category::Transitions => galeri::effects(app, ui, inner, galeri::Source::VideoTransitions),
+        Category::Effects => galeri::effects(app, ui, inner, galeri::Source::VideoEffects),
+        Category::Color => {
+            let mut tab = app.ui.kurgu.color_tab;
+            let body = galeri::tabs(ui, &t, inner, &["Hazır Görünümler", "Ayarla"], &mut tab);
+            app.ui.kurgu.color_tab = tab;
+            match tab {
+                0 => galeri::color_looks(app, ui, body),
+                _ => panel(app, ui, PanelKind::LumetriColor, body),
+            }
+        }
+        Category::Audio => {
+            let mut tab = app.ui.kurgu.audio_tab;
+            let body = galeri::tabs(ui, &t, inner, &["Efektler", "Geçişler", "Ses Ayarları"], &mut tab);
+            app.ui.kurgu.audio_tab = tab;
+            match tab {
+                0 => galeri::effects(app, ui, body, galeri::Source::AudioEffects),
+                1 => galeri::effects(app, ui, body, galeri::Source::AudioTransitions),
+                _ => panel(app, ui, PanelKind::EssentialSound, body),
+            }
+        }
+        _ => match cat.panel() {
+            Some(kind) => panel(app, ui, kind, inner),
+            None => coming_soon(ui, &t, inner, cat),
+        },
     }
 }
 
