@@ -18,6 +18,7 @@ use crate::state::{Mode, Tool};
 use crate::theme::{ThemeKind, Tokens};
 
 mod galeri;
+mod takip;
 
 /// Height of Easy Video Edit's top bar (it takes the place of FilmCraft's header).
 pub const TOP_BAR_H: f32 = 44.0;
@@ -128,6 +129,9 @@ pub struct KurguState {
     /// the place of the category's content.
     #[serde(skip)]
     pub global_search: String,
+    /// The Object Tracking panel's working state.
+    #[serde(skip)]
+    pub track: takip::TrackPanel,
 }
 
 impl Default for KurguState {
@@ -145,6 +149,7 @@ impl Default for KurguState {
             color_tab: 0,
             right_tab: 0,
             global_search: String::new(),
+            track: Default::default(),
         }
     }
 }
@@ -407,11 +412,15 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     card(ui, &t, props);
     // Properties (position, scale, crop, volume) or Effect Settings (every effect on the clip: a
     // tool's or gallery effect's settings open here once it is applied).
-    let mut tab = app.ui.kurgu.right_tab.min(1);
-    let props_inner = galeri::tabs(ui, &t, props, &[tl!("Properties"), tl!("Effect Settings")], &mut tab);
+    let mut tab = app.ui.kurgu.right_tab.min(2);
+    let props_inner = galeri::tabs(ui, &t, props, &[tl!("Properties"), tl!("Effect Settings"), tl!("Object Tracking")], &mut tab);
     app.ui.kurgu.right_tab = tab;
     let props_inner = Rect::from_min_max(props_inner.min + vec2(1.0, 0.0), props_inner.max - vec2(1.0, 1.0));
-    panel(app, ui, if tab == 0 { PanelKind::Properties } else { PanelKind::EffectControls }, props_inner);
+    match tab {
+        0 => panel(app, ui, PanelKind::Properties, props_inner),
+        1 => panel(app, ui, PanelKind::EffectControls, props_inner),
+        _ => takip::show(app, ui, props_inner),
+    }
     // The editing tools (Selection, Razor, …) in a strip left of the timeline: one column when the
     // timeline is tall enough for all of them, two when it is not.
     // Under them, "+" adds a layer (a video or audio track).

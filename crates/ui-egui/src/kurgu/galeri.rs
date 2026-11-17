@@ -826,8 +826,8 @@ pub const TOOLS: &[ToolDef] = &[
         group: "Motion and Time",
         effect: None,
         command: None,
-        soon: true,
-        keywords: "object tracking motion tracking follow nesne takibi takip izle hareket takibi",
+        soon: false,
+        keywords: "object tracking motion tracking follow blur plate license plate face nesne takibi takip izle hareket takibi plaka bulanıklaştır yüz gizle",
     },
 ];
 
@@ -877,7 +877,10 @@ fn apply_tool(app: &mut FilmcraftApp, ctx: &egui::Context, key: &str) {
         app.ui.status = tlf!("{tool}: coming soon", tool = crate::i18n::t(def.label));
         return;
     }
-    if let Some(id) = def.effect {
+    if def.key == "tool:track" {
+        // the Tracking tab on the right walks through it
+        app.ui.kurgu.right_tab = 2;
+    } else if let Some(id) = def.effect {
         apply_effect(app, id);
     } else if let Some(cmd) = def.command {
         if app.session.state.selection.is_empty() {

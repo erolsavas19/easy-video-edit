@@ -325,6 +325,7 @@ pub fn templates() -> Vec<GraphicsTemplate> {
     news(&mut v);
     stylish(&mut v);
     text_effects(&mut v);
+    tracking(&mut v);
     titles(&mut v);
     subtitles(&mut v);
     lower_thirds(&mut v);
@@ -1878,6 +1879,38 @@ fn text_effects(v: &mut Vec<GraphicsTemplate>) {
 }
 
 const TEXT_EFFECTS: &str = "Text Effects";
+
+/// Prefix of the templates the Object Tracking panel attaches to a tracked object.
+pub const TRACK_PREFIX: &str = "easyvideoedit:takip-";
+
+/// What follows a tracked object: a title, a boxed title that covers it (a number plate) and an
+/// arrow. Each is centred on the canvas, so the tracked point is its middle.
+fn tracking(v: &mut Vec<GraphicsTemplate>) {
+    let secs_ = 5.0;
+    let mut add = |id: &str, name: &str, mut e: EffectInstance, controls: Vec<TemplateControl>| {
+        appear(&mut e, 0.0, secs_);
+        let mut t = broadcast(id, name.into(), TRACKING, "Follows a tracked object (Tools ▸ Object Tracking).", secs_, vec![e], controls);
+        t.id = format!("{TRACK_PREFIX}{id}");
+        v.push(t);
+    };
+    let st = Style { shadow: Some((0x000000, 85.0, 4.0, 16.0)), ..news_style("Poppins", "Bold", 0xffffff) };
+    add(
+        "yazi",
+        "Follow · Text",
+        text(1, "Text", s("CONGRATULATIONS", "TEBRİKLER"), (960.0, baseline(540.0, 64.0)), 64.0, &st, 1),
+        text_controls(&[(1, "Text")], 1, None),
+    );
+    let boxed = Style { boxed: Some((0xfacc15, 100.0, 22.0, 8.0)), ..news_style("Poppins", "ExtraBold", 0x111827) };
+    add(
+        "kapak",
+        "Follow · Cover Text",
+        text(1, "Text", s("CONGRATULATIONS", "TEBRİKLER"), (960.0, baseline(540.0, 56.0)), 56.0, &boxed, 1),
+        text_controls(&[(1, "Text")], 1, Some(1)),
+    );
+    add("ok", "Follow · Arrow", glyph(1, "Arrow", "\u{2b07}", (960.0, 540.0), 150.0, 0xef4444, 0xffffff), vec![ctl("color", "Color", 1, "fill_color")]);
+}
+
+const TRACKING: &str = "Follow Object";
 
 /// s("SUBSCRIBE", "ABONE OL") -> "Abone Ol", with Turkish dotted and dotless I.
 fn title_case(s: &str, turkish: bool) -> String {

@@ -63,6 +63,12 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             r#"{"clip":id?,"effect":index|id?,"mask":n?,"direction":"forward"|"backward"?,"frames":n?,"method":"position|positionRotation|positionScaleRotation"?,"wait":bool?}"#,
             track,
         ),
+        spec(
+            "masks.follow",
+            "Follow Tracked Mask",
+            r#"{"clip":id?,"effect":index|id?,"mask":n?,"target":clipId,"place":"center"|"above"?,"offset":[dx,dy]?,"extend":bool?}"#,
+            follow,
+        ),
         spec("masks.toggleVertexSmooth", "Convert Mask Vertex", r#"{"clip":id?,"effect":index|id?,"mask":n?,"vertex":n}"#, toggle_smooth),
         spec("masks.roundCorners", "Round Mask Corners", r#"{"clip":id?,"effect":index|id?,"mask":n?,"radius":px,"vertices":[n]?}"#, round_corners),
         CommandSpec {
@@ -736,6 +742,94 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let st = s.jobs.iter().find(|j| j.id == id).map(crate::Job::to_json).unwrap_or(Value::Null);
     Ok(json!({"job": id, "frames": steps, "status": st}))
+}
+
+/// Timeline time at which `it` shows media time `mt` (the inverse of
+/// [`filmcraft_project::TrackItem::moving_source_time_at`]).
+fn timeline_time_of(it: &filmcraft_project::TrackItem, mt: Tick) -> Tick {
+    let speed = it.speed.abs().max(1e-9);
+    let rel = if it.reverse {
+        let end = it.source_in.0 as f64 + it.duration.0 as f64 * speed - 1.0;
+        (end - mt.0 as f64) / speed
+    } else {
+        (mt.0 - it.source_in.0) as f64 / speed
+    };
+    if !rel.is_finite() {
+        return it.start;
+    }
+    Tick(it.start.0.saturating_add(rel.round() as i64))
+}
+
+/// `masks.follow`: makes clip `target` (a title or sticker above the video) follow a tracked mask.
+/// Every Mask Path keyframe becomes a Motion Position keyframe of the target at the same moment:
+/// the middle of the mask (`place` "center", the default) or just above it ("above"), moved by
+/// `offset` (sequence pixels). With `extend` (default true) a graphic target shorter than the
+/// tracked span is lengthened to cover it. One undo step.
+fn follow(s: &mut Session, p: &Value) -> Result<Value> {
+    let cmd = "masks.follow";
+    let clip = target_clip(s, p)?;
+    let sel = s.state.selected_mask;
+    let target = clip_p(p, "target").ok_or_else(|| bad(cmd, "need `target` (the clip that follows)"))?;
+    if target == clip {
+        return Err(bad(cmd, "a clip can't follow its own mask"));
+    }
+    let seq_id = s.state.active_sequence.ok_or(EngineError::NoSequence)?;
+    let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    let (_, it) = seq.find_item(clip).ok_or_else(|| bad(cmd, "no such clip"))?;
+    let ei = effect_index(&it.effects, p.get("effect"), sel, clip).ok_or_else(|| bad(cmd, "no such effect on clip"))?;
+    let mi =
+        u64_p(p, "mask").map(|m| m as usize).or(sel.filter(|x| x.clip == clip && x.effect == ei).map(|x| x.mask)).ok_or_else(|| bad(cmd, "need `mask`"))?;
+    let mask = it.effects.get(ei).and_then(|e| e.masks.get(mi)).ok_or_else(|| bad(cmd, format!("no mask {mi}")))?;
+    let above = match str_p(p, "place").unwrap_or("center") {
+        "center" => false,
+        "above" => true,
+        x => return Err(bad(cmd, format!("place `{x}`: center or above"))),
+    };
+    let off = p.get("offset").and_then(pt).unwrap_or(Vec2::new(0.0, 0.0));
+    if !off.x.is_finite() || !off.y.is_finite() {
+        return Err(bad(cmd, "`offset` must be numbers"));
+    }
+    let src = filmcraft_render::source_size(&s.project, it.item).ok_or_else(|| bad(cmd, "the clip has no picture"))?;
+    let par = s.project.source_par(it.item);
+    // (timeline time, position in sequence pixels) for every tracked path
+    let mut points: Vec<(Tick, Vec2)> = Vec::new();
+    for k in &mask.path.keyframes {
+        let ParamValue::Path(path) = &k.value else { continue };
+        let (lo, hi) = path.bounds();
+        if !(lo.x.is_finite() && lo.y.is_finite() && hi.x.is_finite() && hi.y.is_finite()) {
+            continue;
+        }
+        let m = filmcraft_render::motion_matrix(seq, it, src, par, k.time);
+        let (a, b) = (m.apply(lo), m.apply(hi));
+        let c = Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
+        let c = if above { Vec2::new(c.x, a.y.min(b.y) - 70.0) } else { c };
+        points.push((timeline_time_of(it, k.time), Vec2::new(c.x + off.x, c.y + off.y)));
+    }
+    if points.is_empty() {
+        return Err(bad(cmd, "the mask is not tracked yet: track it first"));
+    }
+    points.sort_by_key(|(t, _)| *t);
+    let (first, last) = (points[0].0, points[points.len() - 1].0);
+    let (_, tgt) = seq.find_item(target).ok_or_else(|| bad(cmd, "no such target clip"))?;
+    let graphic = matches!(s.project.item(tgt.item).map(|i| &i.kind), Some(filmcraft_project::ItemKind::Graphic { .. }));
+    let extend = bool_p(p, "extend").unwrap_or(true) && graphic;
+    let n = points.len();
+    s.edit("Follow Tracked Mask", move |pr, _| {
+        let q = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
+        let (_, t) = q.find_item_mut(target).ok_or(filmcraft_edit::EditError::NoItem(target))?;
+        if extend && t.start <= first && t.end() < last {
+            t.duration = last - t.start + Tick(1);
+        }
+        let keys: Vec<(Tick, Vec2)> = points.iter().map(|(tt, c)| (t.effect_time_at(*tt), *c)).collect();
+        let motion = t.effects.iter_mut().find(|e| e.effect == "motion").ok_or_else(|| bad(cmd, "the target has no Motion"))?;
+        let pos = motion.params.get_mut("position").ok_or_else(|| bad(cmd, "the target has no Position"))?;
+        pos.keyframes.clear();
+        for (mt, c) in keys {
+            pos.put_keyframe(mt, ParamValue::Vec2(c));
+        }
+        Ok(())
+    })?;
+    Ok(json!({"target": target.0, "keyframes": n, "from": first.0, "to": last.0}))
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

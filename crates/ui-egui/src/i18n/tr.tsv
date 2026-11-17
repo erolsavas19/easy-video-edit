@@ -3853,3 +3853,26 @@
 	Letter Animation	Harf Animasyonu
 	Letter Animation Start	Harf Animasyonu Başlangıcı
 	Letter Animation Duration	Harf Animasyonu Süresi
+	Text Over It	Üstüne Yazı
+	Text Above It	Üstünde Yazı
+	Mark something in the picture and the effect or title follows it as it moves.	Görüntüde bir şeyi işaretleyin; efekt ya da yazı o hareket ettikçe onu izlesin.
+	Select the video clip in the timeline	Zaman çizelgesinde video klibi seçin
+	No video clip selected	Video klibi seçili değil
+	Choose what follows the object	Nesneyi neyin izleyeceğini seçin
+	Mark the object	Nesneyi işaretleyin
+	Mark Object	Nesneyi İşaretle
+	First select a video clip in the timeline.	Önce zaman çizelgesinde bir video klibi seçin.
+	Drag the box onto the object in the preview; drag its corners to fit it. Move the playhead to where the object is clearly seen.	Önizlemedeki kutuyu nesnenin üzerine sürükleyin, köşelerinden çekerek boyutunu ayarlayın. Oynatma çizgisini nesnenin net göründüğü yere getirin.
+	Start Over	Baştan Başla
+	Track	Takip Et
+	Track Forward	İleri Takip Et
+	Backward	Geriye
+	✔ Tracked over {n} frames	✔ {n} kare boyunca takip edildi
+	Attach	Bağla
+	Attach Again	Yeniden Bağla
+	Attach to the Object	Nesneye Bağla
+	Select the title in the timeline to change its text and colors on the right.	Yazısını ve renklerini sağdan değiştirmek için zaman çizelgesinde başlığı seçin.
+	Track first; then the title is placed on its own layer and follows the object.	Önce takip edin; sonra başlık kendi katmanına yerleşir ve nesneyi izler.
+	Follow Object	Nesne Takibi
+	Follow	Takip
+	Cover Text	Kapatan Yazı

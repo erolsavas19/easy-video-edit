@@ -518,3 +518,41 @@ fn every_project_replacing_path_drops_pending_tracking_jobs() {
     }
     let _ = std::fs::remove_file(&tpl);
 }
+
+/// `masks.follow`: a title follows a tracked mask (its Motion Position keyframes sit on the mask's
+/// middle, one per tracked frame), and bad requests are refused without changing the project.
+#[test]
+fn a_title_follows_a_tracked_mask() {
+    let (mut s, clip) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    s.set_playhead(rate.tick_of(10));
+    let c = truth(10.0).apply(filmcraft_geom::Vec2::ZERO);
+    s.execute("effects.apply", json!({"effect": "gaussian_blur"})).unwrap();
+    s.execute("masks.add", json!({"effect": "gaussian_blur", "shape": "rectangle", "center": [c.x, c.y], "size": [80, 80]})).unwrap();
+    let title =
+        s.execute("graphics.template.apply", json!({"template": "easyvideoedit:takip-yazi", "time": rate.tick_of(10).0})).unwrap()["clip"].as_u64().unwrap();
+    // not tracked yet: refused
+    let r = s.execute("masks.follow", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": title}));
+    assert!(r.is_err());
+    s.execute("masks.track", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "direction": "forward", "frames": 6, "wait": true})).unwrap();
+    for bad in [json!({"target": clip.0}), json!({"target": title, "place": "below"}), json!({"target": 999_999})] {
+        let mut p = bad.clone();
+        p["clip"] = json!(clip.0);
+        p["effect"] = json!("gaussian_blur");
+        p["mask"] = json!(0);
+        assert!(s.execute("masks.follow", p).is_err(), "{bad}");
+    }
+    let r = s.execute("masks.follow", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": title})).unwrap();
+    assert_eq!(r["keyframes"], 7, "{r}");
+    let q = s.active_sequence().unwrap();
+    let (_, t) = q.find_item(ClipId(title)).unwrap();
+    let pos = &t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"];
+    assert_eq!(pos.keyframes.len(), 7);
+    let filmcraft_project::ParamValue::Vec2(p0) = pos.keyframes[0].value else { panic!("a point") };
+    assert!((p0 - c).length() < 1.5, "starts on the mask: {p0:?} vs {c:?}");
+    // one undo step
+    s.undo();
+    let q = s.active_sequence().unwrap();
+    let (_, t) = q.find_item(ClipId(title)).unwrap();
+    assert!(t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"].keyframes.is_empty());
+}
