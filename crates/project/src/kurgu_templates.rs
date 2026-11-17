@@ -324,6 +324,7 @@ pub fn templates() -> Vec<GraphicsTemplate> {
     // the broadcast graphics and stylish titles first: the ones most asked for
     news(&mut v);
     stylish(&mut v);
+    text_effects(&mut v);
     titles(&mut v);
     subtitles(&mut v);
     lower_thirds(&mut v);
@@ -556,12 +557,17 @@ const SYMBOLS: &str = "Noto Sans Symbols 2";
 /// A symbol glyph centred on `c`, coloured, with an outline and a shadow so it reads as a sticker.
 fn glyph(uid: u64, name: &str, ch: &str, c: (f64, f64), size: f64, color: u32, outline: u32) -> EffectInstance {
     let st = Style {
-        stroke: Some((outline, size / 22.0)),
-        shadow: Some((0x000000, 55.0, size / 40.0, size / 14.0)),
+        // rounded so a template saved and read back is the same (JSON keeps ~17 digits)
+        stroke: Some((outline, round2(size / 22.0))),
+        shadow: Some((0x000000, 55.0, round2(size / 40.0), round2(size / 14.0))),
         ..style("oge", "Element", SYMBOLS, "Regular", color)
     };
     // the position is the text's baseline: about a third of the size under the centre
     text(uid, name, ch, (c.0, c.1 + size * 0.36), size, &st, 1)
+}
+
+fn round2(v: f64) -> f64 {
+    (v * 100.0).round() / 100.0
 }
 
 fn ellipse(uid: u64, name: &str, pos: (f64, f64), size: (f64, f64), color: u32) -> EffectInstance {
@@ -1835,6 +1841,43 @@ fn stylish(v: &mut Vec<GraphicsTemplate>) {
         ));
     }
 }
+
+/// Letter-animated titles: one text layer whose letters type, rise, drop, pop, close in or wave
+/// (the text layer's Letter Animation), so the text stays one editable line.
+fn text_effects(v: &mut Vec<GraphicsTemplate>) {
+    // (kind in LETTER_ANIM_OPTS, id, name, seconds the reveal takes, styles)
+    let kinds: [(u32, &str, &str, f64, &[Style]); 6] = [
+        (1, "daktilo", "Typewriter", 1.6, &[DAKTILO, SADE, OYUN]),
+        (2, "yuksel", "Rise", 0.9, &[AFIS, GRADYAN, SADE]),
+        (3, "dus", "Drop", 0.9, &[KOMIK, KALIN_GOLGE]),
+        (4, "patla", "Pop", 0.9, &[KALIN_GOLGE, NEON, EGLENCELI]),
+        (5, "yayil", "Spread", 1.4, &[SINEMA, ALTIN]),
+        (6, "dalga", "Wave", 1.0, &[NEON, LOBSTER, EGLENCELI]),
+    ];
+    for (kind, kid, kname, reveal, styles) in kinds {
+        for st in styles {
+            let secs_ = 5.0;
+            let sample = if st.font == "Lobster" { s("Your Text Here", "Metniniz Burada") } else { s("YOUR TEXT HERE", "METNİNİZ BURADA") };
+            let mut e = text(1, "Text", sample, (960.0, baseline(540.0, 110.0)), 110.0, st, 1);
+            set(&mut e, "letter_anim", ParamValue::Choice(kind));
+            set(&mut e, "letter_anim_duration", ParamValue::Float(reveal));
+            appear(&mut e, 0.0, secs_);
+            let mut controls = text_controls(&[(1, "Text")], 1, boxed_uid(st, 1));
+            controls.push(ctl("letters", "Letter Animation Duration", 1, "letter_anim_duration"));
+            v.push(broadcast(
+                &format!("metinfx-{kid}-{}", st.id),
+                format!("Text Effect · {kname} · {}", st.name),
+                TEXT_EFFECTS,
+                "A title whose letters come in one after another.",
+                secs_,
+                vec![e],
+                controls,
+            ));
+        }
+    }
+}
+
+const TEXT_EFFECTS: &str = "Text Effects";
 
 /// s("SUBSCRIBE", "ABONE OL") -> "Abone Ol", with Turkish dotted and dotless I.
 fn title_case(s: &str, turkish: bool) -> String {

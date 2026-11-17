@@ -25,6 +25,8 @@ pub const CAPS_OPTS: &[&str] = &["Normal", "All Caps", "Small Caps"];
 pub const STROKE_OPTS: &[&str] = &["Outer", "Center", "Inner"];
 pub const SHAPE_OPTS: &[&str] = &["Rectangle", "Ellipse", "Polygon", "Path"];
 pub const FILL_KIND_OPTS: &[&str] = &["Solid", "Linear Gradient"];
+/// Letter animations of a text layer ([`LetterAnim`]), in `letter_anim` order.
+pub const LETTER_ANIM_OPTS: &[&str] = &["None", "Typewriter", "Rise", "Drop", "Pop", "Spread", "Wave"];
 
 /// Whether an effect instance is a graphic layer.
 pub fn is_layer_id(id: &str) -> bool {
@@ -174,6 +176,9 @@ pub(crate) fn layer_defs() -> Vec<EffectDef> {
                 fl("box_width", "Text Box Width", 0.0, (0.0, 100_000.0), (0.0, 3840.0), "", X),
                 fl("box_height", "Text Box Height", 0.0, (0.0, 100_000.0), (0.0, 2160.0), "", X),
                 bo("vertical", "Vertical Text", false, X),
+                chc("letter_anim", "Letter Animation", LETTER_ANIM_OPTS, 0, X),
+                fl("letter_anim_start", "Letter Animation Start", 0.0, (0.0, 3600.0), (0.0, 10.0), "", X),
+                fl("letter_anim_duration", "Letter Animation Duration", 1.0, (0.05, 3600.0), (0.1, 10.0), "", X),
             ],
         ),
         layer_def(
@@ -295,6 +300,21 @@ pub struct TextProps {
     pub vertical: bool,
     /// Per-character style overrides as *byte* ranges of `text` (sorted, non-overlapping).
     pub runs: Vec<(std::ops::Range<usize>, crate::graphic_design::CharStyle)>,
+    /// Letter animation at this moment (none by default).
+    pub letters: LetterAnim,
+}
+
+/// A text layer's letter animation at one moment: which one, how far its reveal has got and the
+/// layer's clock (for the looping Wave). Applied to the laid-out glyphs when the layer is drawn,
+/// so the text, its caret and its box are those of the settled text.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LetterAnim {
+    /// Index into [`LETTER_ANIM_OPTS`]; 0 = none.
+    pub kind: u32,
+    /// Reveal progress, 0 (not started) to 1 (every letter in place).
+    pub progress: f32,
+    /// Seconds since the animation started (Wave).
+    pub seconds: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -362,6 +382,19 @@ fn vv(e: &EffectInstance, id: &str, t: Tick) -> Vec2 {
 /// Largest shadow distance, size or blur, in layer pixels (the parameters' range).
 const MAX_SHADOW_PX: f32 = 1000.0;
 
+/// The letter animation of text layer `e` at clip time `t`.
+fn letter_anim(e: &EffectInstance, t: Tick) -> LetterAnim {
+    let kind = ch(e, "letter_anim", t);
+    if kind == 0 || kind as usize >= LETTER_ANIM_OPTS.len() {
+        return LetterAnim::default();
+    }
+    let now = t.0 as f64 / filmcraft_time::TICKS_PER_SECOND as f64;
+    let since = (now - f64::from(ff(e, "letter_anim_start", t))) as f32;
+    let dur = ff(e, "letter_anim_duration", t).max(0.05);
+    let since = if since.is_finite() { since } else { 0.0 };
+    LetterAnim { kind, progress: (since / dur).clamp(0.0, 1.0), seconds: since.max(0.0) }
+}
+
 /// Evaluate a layer at clip (media) time `t`. `frame` is the graphic's canvas size; a NaN position
 /// means the canvas centre.
 pub fn eval_layer(e: &EffectInstance, t: Tick, frame: (u32, u32)) -> Option<LayerSpec> {
@@ -389,6 +422,7 @@ pub fn eval_layer(e: &EffectInstance, t: Tick, frame: (u32, u32)) -> Option<Laye
                 box_width: ff(e, "box_width", t).max(0.0),
                 box_height: ff(e, "box_height", t).max(0.0),
                 vertical: bb(e, "vertical", t),
+                letters: letter_anim(e, t),
             }
         }),
         SHAPE_LAYER => {

@@ -232,6 +232,7 @@ mod ime_byte_delete_tests {
             box_height: 0.0,
             vertical: false,
             runs: Vec::new(),
+            letters: Default::default(),
         };
         let view = super::LayerView {
             clip: ClipId(1),

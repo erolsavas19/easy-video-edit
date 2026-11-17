@@ -420,6 +420,7 @@ pub fn raster_layer(spec: &LayerSpec, m: &Xform, cw: usize, ch: usize) -> Option
     let text = match &spec.content {
         LayerContent::Text(t) => {
             let l = text_layout(t);
+            let l = if t.letters.kind == 0 { l } else { Arc::new(animate_letters(&l, &t.letters)) };
             if l.glyphs.is_empty() && l.underlines.is_empty() && ap.background.is_none() {
                 return None;
             }
@@ -549,6 +550,70 @@ pub fn raster_layer(spec: &LayerSpec, m: &Xform, cw: usize, ch: usize) -> Option
         px.iter_mut().for_each(|v| *v *= op);
     }
     Some(LayerRaster { x: x0, y: y0, img: Image { w, h, px } })
+}
+
+/// Letters overlapping in a staggered reveal: each takes this many letters' time to settle.
+const LETTER_OVERLAP: f32 = 3.0;
+
+/// The layout with its letters moved, scaled or hidden by letter animation `a` (see
+/// [`filmcraft_project::graphic::LETTER_ANIM_OPTS`]). Decorations and the bounds stay those of
+/// the settled text.
+pub fn animate_letters(l: &Layout, a: &filmcraft_project::graphic::LetterAnim) -> Layout {
+    let mut out = l.clone();
+    let n = l.glyphs.len() as f32;
+    if n < 1.0 {
+        return out;
+    }
+    let p = a.progress.clamp(0.0, 1.0);
+    // progress of letter `i` in a staggered reveal
+    let local = |i: usize| ((p * (n + LETTER_OVERLAP) - i as f32) / LETTER_OVERLAP).clamp(0.0, 1.0);
+    let ease = |x: f32| 1.0 - (1.0 - x).powi(3);
+    // grows past its size and settles (back ease)
+    let back = |x: f32| {
+        let (c1, c3) = (1.70158f32, 2.70158f32);
+        1.0 + c3 * (x - 1.0).powi(3) + c1 * (x - 1.0).powi(2)
+    };
+    let cx_all = (l.bounds[0] + l.bounds[2]) / 2.0;
+    let mut keep = Vec::with_capacity(out.glyphs.len());
+    for (i, g) in out.glyphs.iter_mut().enumerate() {
+        let size = g.size;
+        let shown = match a.kind {
+            // Typewriter: letters appear one by one
+            1 => (i as f32) < (p * n).floor() || p >= 1.0,
+            // Rise / Drop: letters come up from below or fall from above
+            2 | 3 => {
+                let e = ease(local(i));
+                let dir = if a.kind == 2 { 0.8 } else { -1.0 };
+                g.y += (1.0 - e) * size * dir;
+                local(i) > 0.0
+            }
+            // Pop: letters grow from nothing past their size and settle
+            4 => {
+                let k = back(local(i)).max(0.0);
+                let (cx, cy) = (g.x + size * 0.28, g.y - size * 0.35);
+                g.size = size * k;
+                g.x = cx - (cx - g.x) * k;
+                g.y = cy + (g.y - cy) * k;
+                local(i) > 0.0 && g.size > 0.5
+            }
+            // Spread: letters close in from far apart
+            5 => {
+                let e = ease(p);
+                g.x = cx_all + (g.x - cx_all) * (1.0 + (1.0 - e) * 1.6);
+                true
+            }
+            // Wave: letters bob up and down, one after another, all the time
+            6 => {
+                g.y += (a.seconds * 6.0 - i as f32 * 0.55).sin() * size * 0.12;
+                true
+            }
+            _ => true,
+        };
+        keep.push(shown);
+    }
+    let mut k = keep.into_iter();
+    out.glyphs.retain(|_| k.next().unwrap_or(true));
+    out
 }
 
 type Cache = Mutex<HashMap<u64, (u64, Option<Arc<LayerRaster>>)>>;

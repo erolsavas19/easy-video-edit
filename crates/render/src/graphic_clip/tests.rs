@@ -505,3 +505,35 @@ fn style_runs_that_own_no_glyph_cost_no_colour_group() {
     assert!(t.elapsed() < std::time::Duration::from_secs(15), "{:?}", t.elapsed());
     assert!(ink_box(&img).is_some(), "the letter is still drawn");
 }
+
+/// Letter animations: Typewriter shows the letters one by one, Pop hides them all before it
+/// starts and settles on the plain layout, and hostile settings never panic.
+#[test]
+fn letter_animations_reveal_and_settle() {
+    let mut e = new_text_layer("HELLO", Vec2::new(30.0, 110.0), 60.0);
+    let spec_at = |e: &EffectInstance, s: f64| match eval_layer(e, Tick::from_seconds_f64(s), (400, 300)).map(|l| l.content) {
+        Some(LayerContent::Text(t)) => t,
+        _ => panic!("a text layer"),
+    };
+    let plain = text_layout(&spec_at(&e, 0.0));
+    assert_eq!(plain.glyphs.len(), 5);
+    set(&mut e, "letter_anim", ParamValue::Choice(1));
+    set(&mut e, "letter_anim_duration", ParamValue::Float(1.0));
+    let half = spec_at(&e, 0.5);
+    assert_eq!(animate_letters(&text_layout(&half), &half.letters).glyphs.len(), 2);
+    let done = spec_at(&e, 2.0);
+    assert_eq!(animate_letters(&text_layout(&done), &done.letters).glyphs, plain.glyphs);
+    set(&mut e, "letter_anim", ParamValue::Choice(4));
+    set(&mut e, "letter_anim_start", ParamValue::Float(1.0));
+    let before = spec_at(&e, 0.5);
+    assert!(animate_letters(&text_layout(&before), &before.letters).glyphs.is_empty());
+    let settled = spec_at(&e, 3.0);
+    assert_eq!(animate_letters(&text_layout(&settled), &settled.letters).glyphs, plain.glyphs);
+    // out-of-range kind, zero and NaN durations
+    for (kind, dur) in [(99u32, 1.0), (2, 0.0), (6, f64::NAN), (5, -4.0)] {
+        set(&mut e, "letter_anim", ParamValue::Choice(kind));
+        set(&mut e, "letter_anim_duration", ParamValue::Float(dur));
+        let t = spec_at(&e, 0.7);
+        let _ = animate_letters(&text_layout(&t), &t.letters);
+    }
+}
