@@ -200,10 +200,18 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     &t,
                     tl!("Drag the box onto the object in the preview; drag its corners to fit it. Move the playhead to where the object is clearly seen."),
                 );
-                if small_button(ui, &t, tl!("Start Over"), "kurgu.tracking.reset").clicked() {
-                    // the box stays on the clip (undo removes it); the panel starts a new one
-                    app.ui.kurgu.track = TrackPanel { action: app.ui.kurgu.track.action, ..Default::default() };
-                }
+                ui.horizontal(|ui| {
+                    if small_button(ui, &t, tl!("Start Over"), "kurgu.tracking.reset").clicked() {
+                        // the box and what follows it stay; the panel starts a new one
+                        app.ui.kurgu.track = TrackPanel { action: app.ui.kurgu.track.action, ..Default::default() };
+                    }
+                    if small_button(ui, &t, tl!("Remove Tracking"), "kurgu.tracking.remove")
+                        .on_hover_text(tl!("Removes the box, its effect and the attached title"))
+                        .clicked()
+                    {
+                        remove(app);
+                    }
+                });
             }
         }
 
@@ -333,6 +341,31 @@ fn mark(app: &mut FilmcraftApp, clip: filmcraft_project::ClipId, size: (u32, u32
         }
         Err(e) => app.ui.status = e,
     }
+}
+
+/// Takes the tracking away: the attached title, then the box's effect (with the box), and stops a
+/// running track first.
+fn remove(app: &mut FilmcraftApp) {
+    let st = app.ui.kurgu.track.clone();
+    if let Some(j) = st.job.and_then(|id| app.session.jobs.iter().find(|j| j.id == id)) {
+        j.progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    let mut err = None;
+    if let Some(title) = st.follower
+        && app.session.active_sequence().is_some_and(|q| q.find_item(filmcraft_project::ClipId(title)).is_some())
+        && let Err(e) = app.session.execute("edit.clear", json!({"clip": title}))
+    {
+        err = Some(e.to_string());
+    }
+    if let Some((clip, effect, _)) = st.target
+        && let Err(e) = app.session.execute("effects.remove", json!({"clip": clip, "index": effect}))
+    {
+        err = Some(e.to_string());
+    }
+    if let Some(e) = err {
+        app.ui.status = e;
+    }
+    app.ui.kurgu.track = TrackPanel { action: st.action, ..Default::default() };
 }
 
 fn track(app: &mut FilmcraftApp, direction: &str) {
