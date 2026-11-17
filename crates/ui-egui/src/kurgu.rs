@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::FilmcraftApp;
 use crate::dock::PanelKind;
 use crate::icons::{self, Icon};
-use crate::state::Mode;
+use crate::state::{Mode, Tool};
 use crate::theme::{ThemeKind, Tokens};
 
 mod galeri;
@@ -92,8 +92,7 @@ impl Category {
             Category::Text => Some(PanelKind::EssentialGraphics),
             Category::Transitions | Category::Effects | Category::Color | Category::Audio => None,
             Category::Voiceover => Some(PanelKind::TextToSpeech),
-            Category::Tools => Some(PanelKind::EffectControls),
-            Category::Elements | Category::Intros => None,
+            Category::Tools | Category::Elements | Category::Intros => None,
         }
     }
 }
@@ -123,6 +122,12 @@ pub struct KurguState {
     pub audio_tab: u8,
     /// Color: Looks or Adjust.
     pub color_tab: u8,
+    /// The right side: Properties (0) or Effect Settings (1).
+    pub right_tab: u8,
+    /// The search in the top bar, across every category; while it holds text the results take
+    /// the place of the category's content.
+    #[serde(skip)]
+    pub global_search: String,
 }
 
 impl Default for KurguState {
@@ -138,6 +143,8 @@ impl Default for KurguState {
             selected: None,
             audio_tab: 0,
             color_tab: 0,
+            right_tab: 0,
+            global_search: String::new(),
         }
     }
 }
@@ -152,7 +159,54 @@ pub fn top_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let x = rect.min.x + 16.0;
     let cy = rect.center().y;
     let easy = p.text(pos2(x, cy), Align2::LEFT_CENTER, "Easy", Tokens::ui(17.0), t.accent);
-    p.text(pos2(easy.max.x + 5.0, cy), Align2::LEFT_CENTER, "Video Edit", Tokens::ui(17.0), t.text);
+    let name = p.text(pos2(easy.max.x + 5.0, cy), Align2::LEFT_CENTER, "Video Edit", Tokens::ui(17.0), t.text);
+
+    // Left side, after the name: the File menu, then Undo and Redo.
+    let mut left = name.max.x + 22.0;
+    let file = pill_left(ui, &t, &mut left, cy, tl!("File"));
+    let mut chosen: Option<String> = None;
+    egui::Popup::menu(&file).show(|ui| file_menu(app, ui, &mut chosen));
+    left += 6.0;
+    for (id, icon, label) in [("edit.undo", Icon::Undo, tl!("Undo")), ("edit.redo", Icon::Redo, tl!("Redo"))] {
+        let enabled = filmcraft_engine::find_command(id).is_none_or(|c| (c.enabled)(&app.session).is_ok());
+        let r = Rect::from_center_size(pos2(left + 14.0, cy), vec2(28.0, 28.0));
+        left += 32.0;
+        let resp = ui.interact(r, egui::Id::unique(("kurgu-edit", id)), if enabled { Sense::click() } else { Sense::hover() }).on_hover_text(label);
+        if enabled && resp.hovered() {
+            ui.painter().rect_filled(r, CornerRadius::same(6), t.hover);
+        }
+        icons::paint(
+            ui.painter(),
+            r.shrink(6.0),
+            icon,
+            if !enabled {
+                t.text_faint
+            } else if resp.hovered() {
+                t.text
+            } else {
+                t.icon
+            },
+        );
+        if enabled && resp.clicked() {
+            chosen = Some(id.to_string());
+        }
+    }
+    if let Some(id) = chosen {
+        run(app, ui.ctx(), &id);
+    }
+    // The project's name after them, marked while it has unsaved changes; a new project's
+    // engine-given name "Untitled" shows in the interface language.
+    let project = if app.session.project.name == "Untitled" { tl!("Untitled").to_string() } else { app.session.project.name.clone() };
+    let title = if app.session.is_dirty() { tlf!("{name} - Edited", name = project) } else { project };
+    ui.painter().text(pos2(left + 10.0, cy), Align2::LEFT_CENTER, title, Tokens::ui(12.0), t.text_dim);
+
+    // The search across everything (tools, effects, transitions, texts…) in the middle.
+    let sw = (rect.width() * 0.24).clamp(180.0, 340.0);
+    let sr = Rect::from_center_size(pos2(rect.center().x + 40.0, cy), vec2(sw, 26.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(sr).id_salt("kurgu-global-search"));
+    let mut q = app.ui.kurgu.global_search.clone();
+    crate::widgets::search_field(&mut child, &mut q, tl!("Search: chroma, stabilize, blur, title…"), sr.width(), &t);
+    app.ui.kurgu.global_search = q;
 
     // Right side, from the right edge leftwards.
     let mut right = rect.max.x - 12.0;
@@ -175,6 +229,16 @@ pub fn top_bar(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         app.ui.kurgu.enabled = false;
         app.ui.mode = Mode::Edit;
     }
+    // Settings: proxies, hardware decoding and the full Settings window.
+    let gear = Rect::from_center_size(pos2(right - 14.0, cy), vec2(28.0, 28.0));
+    right -= 36.0;
+    let gresp =
+        ui.interact(gear, egui::Id::unique("kurgu-settings"), Sense::click()).on_hover_text(tl!("Settings")).on_hover_cursor(egui::CursorIcon::PointingHand);
+    if gresp.hovered() {
+        ui.painter().rect_filled(gear, CornerRadius::same(6), t.hover);
+    }
+    icons::paint(ui.painter(), gear.shrink(6.0), Icon::Gear, if gresp.hovered() { t.text } else { t.text_dim });
+    egui::Popup::menu(&gresp).show(|ui| settings_menu(app, ui));
     let light = app.tokens.kind == ThemeKind::Light;
     let theme_label = if light { tl!("Dark Theme") } else { tl!("Light Theme") };
     if pill(ui, &t, &mut right, cy, theme_label, false).clicked() {
@@ -208,12 +272,97 @@ pub fn simple_mode_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, header: Rec
     Rect::from_min_max(pos2(strip.max.x, header.min.y), header.max)
 }
 
+/// The File menu of the top bar; the picked command goes to `chosen`, run once the menu is drawn.
+fn file_menu(app: &FilmcraftApp, ui: &mut egui::Ui, chosen: &mut Option<String>) {
+    ui.set_min_width(200.0);
+    fn item(ui: &mut egui::Ui, chosen: &mut Option<String>, label: &str, id: &str) {
+        if ui.button(label).clicked() {
+            *chosen = Some(id.to_string());
+            ui.close();
+        }
+    }
+    item(ui, chosen, tl!("New Project…"), "file.newProject");
+    item(ui, chosen, tl!("Open Project…"), "file.open");
+    let recent = &app.session.prefs.general.recent_projects;
+    ui.add_enabled_ui(!recent.is_empty(), |ui| {
+        ui.menu_button(tl!("Open Recent"), |ui| {
+            for (i, path) in recent.iter().enumerate().take(10) {
+                let name = std::path::Path::new(path).file_stem().map_or_else(|| path.clone(), |s| s.to_string_lossy().into_owned());
+                if ui.button(name).on_hover_text(path).clicked() {
+                    *chosen = Some(format!("file.openRecent.{i}"));
+                    ui.close();
+                }
+            }
+        });
+    });
+    ui.separator();
+    item(ui, chosen, tl!("Save"), "file.save");
+    item(ui, chosen, tl!("Save As…"), "file.saveAs");
+    ui.separator();
+    item(ui, chosen, tl!("Import Media…"), "file.import");
+}
+
+/// The Settings menu of the top bar: proxies, hardware decoding and FilmCraft's Settings window.
+fn settings_menu(app: &mut FilmcraftApp, ui: &mut egui::Ui) {
+    ui.set_min_width(260.0);
+    let mut proxies = app.session.prefs.media.enable_proxies;
+    if ui.checkbox(&mut proxies, tl!("Use proxies (smoother playback)")).changed()
+        && let Err(e) = app.session.execute("media.toggleProxies", serde_json::json!({"enabled": proxies}))
+    {
+        app.ui.status = e.to_string();
+    }
+    if ui.button(tl!("Create Proxies for Selected Media…")).clicked() {
+        ui.close();
+        run(app, ui.ctx(), "media.createProxies");
+    }
+    ui.separator();
+    let mut hw = app.session.prefs.playback.hardware_decoding != "off";
+    if ui
+        .checkbox(&mut hw, tl!("Hardware-accelerated decoding (graphics card)"))
+        .on_hover_text(tl!("Media already open keeps its decoder until it is reopened"))
+        .changed()
+    {
+        let mut next = app.session.prefs.clone();
+        next.playback.hardware_decoding = if hw { "auto" } else { "off" }.to_string();
+        if let Err(e) = app.session.set_prefs(next) {
+            app.ui.status = e.to_string();
+        }
+    }
+    ui.separator();
+    if ui.button(tl!("All Settings…")).clicked() {
+        ui.close();
+        app.dialog = Some(crate::Dialog::Preferences);
+    }
+}
+
+/// Runs a menu command the way FilmCraft's menus do (with their file dialogs and "save changes?"
+/// questions); a failure shows in the status bar.
+fn run(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str) {
+    if let Err(e) = crate::menus::invoke(app, ctx, id, serde_json::json!({})) {
+        app.ui.status = e;
+    }
+}
+
+/// A rounded button laid out left to right: draws it right of `left` and moves `left` past it.
+fn pill_left(ui: &mut egui::Ui, t: &Tokens, left: &mut f32, cy: f32, label: &str) -> egui::Response {
+    let font = Tokens::ui(12.5);
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), t.text).size().x) + 24.0;
+    let rect = Rect::from_min_size(pos2(*left, cy - 14.0), vec2(w, 28.0));
+    *left += w + 8.0;
+    pill_at(ui, t, rect, label, false)
+}
+
 /// A rounded button laid out right to left: draws it left of `right` and moves `right` past it.
 fn pill(ui: &mut egui::Ui, t: &Tokens, right: &mut f32, cy: f32, label: &str, primary: bool) -> egui::Response {
     let font = Tokens::ui(12.5);
     let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), t.text).size().x) + 24.0;
     let rect = Rect::from_center_size(pos2(*right - w / 2.0, cy), vec2(w, 28.0));
     *right -= w + 8.0;
+    pill_at(ui, t, rect, label, primary)
+}
+
+fn pill_at(ui: &mut egui::Ui, t: &Tokens, rect: Rect, label: &str, primary: bool) -> egui::Response {
+    let font = Tokens::ui(12.5);
     let resp = ui.interact(rect, egui::Id::unique(("kurgu-pill", label)), Sense::click());
     let (fill, text) = if primary {
         (if resp.hovered() { t.accent_hover } else { t.accent }, Color32::WHITE)
@@ -256,10 +405,32 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     card(ui, &t, preview);
     panel(app, ui, PanelKind::Program, preview.shrink(1.0));
     card(ui, &t, props);
-    let props_inner = titled(ui, &t, props, tl!("Properties"));
-    panel(app, ui, PanelKind::Properties, props_inner);
+    // Properties (position, scale, crop, volume) or Effect Settings (every effect on the clip: a
+    // tool's or gallery effect's settings open here once it is applied).
+    let mut tab = app.ui.kurgu.right_tab.min(1);
+    let props_inner = galeri::tabs(ui, &t, props, &[tl!("Properties"), tl!("Effect Settings")], &mut tab);
+    app.ui.kurgu.right_tab = tab;
+    let props_inner = Rect::from_min_max(props_inner.min + vec2(1.0, 0.0), props_inner.max - vec2(1.0, 1.0));
+    panel(app, ui, if tab == 0 { PanelKind::Properties } else { PanelKind::EffectControls }, props_inner);
+    // The editing tools (Selection, Razor, …) in a strip left of the timeline: one column when the
+    // timeline is tall enough for all of them, two when it is not.
+    // Under them, "+" adds a layer (a video or audio track).
+    let tools_need = Tool::groups().len() as f32 * 36.0 + 8.0 + LAYER_BTN;
+    let tools_w = if timeline.height() >= tools_need { 42.0 } else { 80.0 };
+    let tools = Rect::from_min_size(timeline.min, vec2(tools_w, timeline.height()));
+    let timeline = Rect::from_min_max(pos2(tools.max.x + 4.0, timeline.min.y), timeline.max);
+    card(ui, &t, tools);
+    let tools_body = Rect::from_min_max(tools.min, pos2(tools.max.x, tools.max.y - LAYER_BTN));
+    panel(app, ui, PanelKind::Tools, tools_body.shrink(1.0));
+    add_layer_button(app, ui, Rect::from_min_max(pos2(tools.min.x, tools_body.max.y), tools.max));
     card(ui, &t, timeline);
     panel(app, ui, PanelKind::Timeline, timeline.shrink(1.0));
+    // Where the panels are, for drop targets (a clip, effect or title dropped on the timeline).
+    let layer = ui.layer_id();
+    crate::FilmcraftApp::record_panel_bodies(
+        ui.ctx(),
+        vec![(PanelKind::Timeline, timeline.shrink(1.0), layer), (PanelKind::Program, preview.shrink(1.0), layer), (PanelKind::Properties, props_inner, layer)],
+    );
 
     // Dividers: content|preview, preview|props, top|timeline.
     let d1 = Rect::from_min_max(pos2(content.max.x, top.min.y), pos2(preview.min.x, top.max.y));
@@ -275,6 +446,45 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
         && rest.height() > 0.0
     {
         app.ui.kurgu.timeline_share = ((timeline_h - dy) / rest.height()).clamp(0.18, 0.7);
+    }
+}
+
+/// Height of the "+" (add layer) button under the editing tools.
+const LAYER_BTN: f32 = 34.0;
+
+/// "+" under the editing tools: adds a video layer (a track above the others) or an audio layer.
+fn add_layer_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, area: Rect) {
+    let t = app.tokens;
+    let r = Rect::from_center_size(area.center(), vec2(30.0, 26.0));
+    let has_seq = app.session.active_sequence().is_some();
+    let resp = ui
+        .interact(r, egui::Id::unique("kurgu-add-layer"), if has_seq { Sense::click() } else { Sense::hover() })
+        .on_hover_text(tl!("Add Layer"))
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    app.auto.add("kurgu.addLayer", r, tl!("Add Layer"));
+    let fill = if resp.hovered() && has_seq { t.accent } else { t.field_bg };
+    ui.painter().rect_filled(r, CornerRadius::same(6), fill);
+    let color = if !has_seq {
+        t.text_dim
+    } else if resp.hovered() {
+        Color32::WHITE
+    } else {
+        t.text
+    };
+    icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(16.0, 16.0)), Icon::Plus, color);
+    let mut chosen: Option<serde_json::Value> = None;
+    egui::Popup::menu(&resp).show(|ui| {
+        if ui.button(tl!("Add Video Layer")).clicked() {
+            chosen = Some(serde_json::json!({"video": 1, "audio": 0}));
+        }
+        if ui.button(tl!("Add Audio Layer")).clicked() {
+            chosen = Some(serde_json::json!({"video": 0, "audio": 1}));
+        }
+    });
+    if let Some(p) = chosen
+        && let Err(e) = app.session.execute("sequence.addTracks", p)
+    {
+        app.ui.status = e.to_string();
     }
 }
 
@@ -313,6 +523,8 @@ fn draw_rail(app: &mut FilmcraftApp, ui: &mut egui::Ui, rail: Rect) {
 fn select(app: &mut FilmcraftApp, cat: Category) {
     let was = app.ui.kurgu.category;
     app.ui.kurgu.category = cat;
+    // picking a category leaves the search across everything
+    app.ui.kurgu.global_search.clear();
     if was != cat {
         app.ui.kurgu.search.clear();
     }
@@ -325,14 +537,35 @@ fn select(app: &mut FilmcraftApp, cat: Category) {
 fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let t = app.tokens;
     card(ui, &t, rect);
+    let query = app.ui.kurgu.global_search.trim().to_string();
+    if !query.is_empty() {
+        let inner = titled(ui, &t, rect, &tlf!("Search: “{query}”", query = query));
+        galeri::search_all(app, ui, inner, &query);
+        return;
+    }
     let cat = app.ui.kurgu.category;
-    let inner = titled(ui, &t, rect, crate::i18n::t(cat.label()));
+    let mut inner = titled(ui, &t, rect, crate::i18n::t(cat.label()));
+    if cat == Category::Media {
+        add_to_timeline_button(app, ui, Rect::from_min_size(rect.min, vec2(rect.width(), 30.0)));
+    }
+    // How to add media to the timeline, along the bottom (the galleries show their own hint).
+    let hint = (cat == Category::Media).then(|| tl!("Drag onto the timeline · or select and press “Add to Timeline”"));
+    if let Some(hint) = hint
+        && inner.height() > 120.0
+    {
+        let strip = Rect::from_min_max(pos2(inner.min.x, inner.max.y - 24.0), inner.max);
+        ui.painter().line_segment([pos2(strip.min.x + 8.0, strip.min.y), pos2(strip.max.x - 8.0, strip.min.y)], Stroke::new(1.0, t.separator));
+        let galley = ui.fonts_mut(|f| f.layout(hint.to_string(), Tokens::ui(11.0), t.text_dim, strip.width() - 16.0));
+        ui.painter().galley(pos2(strip.min.x + 8.0, strip.center().y - galley.size().y / 2.0), galley, t.text_dim);
+        inner.max.y = strip.min.y;
+    }
     match cat {
         Category::Text => galeri::texts(app, ui, inner, galeri::Library::Texts),
         Category::Elements => galeri::texts(app, ui, inner, galeri::Library::Elements),
         Category::Intros => galeri::texts(app, ui, inner, galeri::Library::Intros),
         Category::Transitions => galeri::effects(app, ui, inner, galeri::Source::VideoTransitions),
         Category::Effects => galeri::effects(app, ui, inner, galeri::Source::VideoEffects),
+        Category::Tools => galeri::tools(app, ui, inner),
         Category::Color => {
             let mut tab = app.ui.kurgu.color_tab;
             let body = galeri::tabs(ui, &t, inner, &[tl!("Looks"), tl!("Adjust")], &mut tab);
@@ -356,6 +589,57 @@ fn draw_content(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             Some(kind) => panel(app, ui, kind, inner),
             None => coming_soon(ui, &t, inner, cat),
         },
+    }
+}
+
+/// "Add to Timeline" at the right of the Media title: places the clips selected in Media at the end
+/// of the open sequence (or makes a sequence from them when none is open).
+fn add_to_timeline_button(app: &mut FilmcraftApp, ui: &mut egui::Ui, strip: Rect) {
+    let t = app.tokens;
+    let items: Vec<filmcraft_project::ItemId> = app
+        .session
+        .state
+        .project_selection
+        .iter()
+        .copied()
+        .filter(|i| app.session.project.item(*i).is_some_and(|it| it.has_video() || it.has_audio()))
+        .collect();
+    let label = tl!("Add to Timeline");
+    let font = Tokens::ui(11.5);
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(label.to_string(), font.clone(), t.text).size().x) + 30.0;
+    let r = Rect::from_min_size(pos2(strip.max.x - w - 8.0, strip.center().y - 11.0), vec2(w, 22.0));
+    let enabled = !items.is_empty();
+    let resp = ui.interact(r, egui::Id::unique("kurgu-add-to-timeline"), if enabled { Sense::click() } else { Sense::hover() });
+    let resp = resp.on_hover_text(if enabled { tl!("Place the selected clips at the end of the timeline") } else { tl!("Select clips in Media first") });
+    let fill = if !enabled {
+        t.field_bg
+    } else if resp.hovered() {
+        t.accent_hover
+    } else {
+        t.accent
+    };
+    let fg = if enabled { Color32::WHITE } else { t.text_faint };
+    ui.painter().rect_filled(r, CornerRadius::same(11), fill);
+    icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 13.0, r.center().y), vec2(12.0, 12.0)), Icon::Plus, fg);
+    ui.painter().text(pos2(r.min.x + 22.0, r.center().y), Align2::LEFT_CENTER, label, font, fg);
+    if !(enabled && resp.clicked()) {
+        return;
+    }
+    let ids: Vec<u64> = items.iter().map(|i| i.0).collect();
+    let result = match app.session.active_sequence().map(|s| s.duration()) {
+        // no sequence open yet: one made from the clips, matching the first
+        None => app.session.execute("file.newSequence", serde_json::json!({"fromItems": ids})).map_err(|e| e.to_string()),
+        Some(end) => {
+            let mut params = serde_json::json!({"time": end.0, "insert": false});
+            match ids.as_slice() {
+                [one] => params["item"] = serde_json::json!(one),
+                many => params["items"] = serde_json::json!(many),
+            }
+            crate::panels::clip_mismatch::execute(app, "timeline.place", params)
+        }
+    };
+    if let Err(e) = result {
+        app.ui.status = e;
     }
 }
 

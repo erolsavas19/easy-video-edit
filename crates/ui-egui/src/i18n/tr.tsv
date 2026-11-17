@@ -3655,9 +3655,6 @@
 	Looks	Hazır Görünümler
 	Sound Settings	Ses Ayarları
 	Coming soon	Yakında
-	Double-click, or drag between two clips	Çift tıklayın ya da iki klibin arasına sürükleyin
-	Double-click, or drag onto a clip in the timeline	Çift tıklayın ya da zaman çizelgesindeki klibe sürükleyin
-	Double-click, or drag onto the timeline	Çift tıklayın ya da zaman çizelgesine sürükleyin
 	Other	Diğer
 	No results	Sonuç yok
 	Lower Third	Alt Bant
@@ -3785,3 +3782,67 @@
 	Highlighter	Fosforlu Kalem
 	Based on FilmCraft	FilmCraft'tan türetildi
 	Easy Video Edit on GitHub	GitHub'da Easy Video Edit
+	New Project…	Yeni Proje…
+	Import Media…	Medya İçe Aktar…
+	Add to Timeline	Zaman Çizelgesine Ekle
+	Place the selected clips at the end of the timeline	Seçili klipleri zaman çizelgesinin sonuna yerleştirir
+	Select clips in Media first	Önce Medya bölümünden klip seçin
+	Double-click: add at the playhead · or drag onto the timeline	Çift tıklayın: oynatma çizgisine ekler · ya da zaman çizelgesine sürükleyin
+	Select a clip and double-click · or drag between two clips	Bir klip seçip çift tıklayın · ya da iki klibin arasına sürükleyin
+	Select a clip and double-click · or drag onto a clip	Bir klip seçip çift tıklayın · ya da klibin üzerine sürükleyin
+	Drag onto the timeline · or select and press “Add to Timeline”	Zaman çizelgesine sürükleyin · ya da seçip “Zaman Çizelgesine Ekle”ye basın
+	Most Used	En Çok Kullanılanlar
+	Select a clip in the timeline first	Önce zaman çizelgesinde bir klip seçin
+	Chroma Key	Krom Anahtarı
+	Background Removal	Arka Plan Kaldırma
+	Stabilize	Sabitleme
+	Flip Horizontal	Yatay Çevir
+	Flip Vertical	Dikey Çevir
+	Object Tracking	Nesne Takibi
+	Picture	Görüntü
+	Motion and Time	Hareket ve Zaman
+	Select a clip in the timeline, then click a tool	Zaman çizelgesinde bir klip seçin, sonra bir araca tıklayın
+	Soon	Yakında
+	{tool}: coming soon	{tool}: yakında
+	Double-click to use · or drag onto the timeline	Kullanmak için çift tıklayın · ya da zaman çizelgesine sürükleyin
+	Search: chroma, stabilize, blur, title…	Ara: krom, sabitle, bulanık, başlık…
+	Use proxies (smoother playback)	Proxy kullan (daha akıcı oynatma)
+	Create Proxies for Selected Media…	Seçili Medya için Proxy Oluştur…
+	Hardware-accelerated decoding (graphics card)	Donanım hızlandırmalı kod çözme (ekran kartı)
+	Media already open keeps its decoder until it is reopened	Açık medya, yeniden açılana kadar mevcut kod çözücüyü kullanır
+	All Settings…	Tüm Ayarlar…
+	Effect Settings	Efekt Ayarları
+	Search: “{query}”	Arama: “{query}”
+	Add Layer	Katman Ekle
+	Add Video Layer	Video Katmanı Ekle
+	Add Audio Layer	Ses Katmanı Ekle
+	News & Broadcast	Haber ve Yayın
+	Stylish Titles	Şık Başlıklar
+	Breaking News	Son Dakika
+	Ticker	Kayan Yazı
+	Announcement	Duyuru
+	Info Bar	Bilgi Çubuğu
+	Screen Frame	Ekran Çerçevesi
+	Thin Line	İnce Çizgi
+	Corners	Köşeler
+	Double Line	Çift Çizgi
+	With Info Bar	Bilgi Çubuklu
+	Ring	Halka
+	Gold Ribbon	Altın Kurdele
+	Slanted Lower Third	Eğimli Alt Bant
+	Sliding Bands	Kayan Bantlar
+	Bracketed Title	Köşeli Başlık
+	Glitch Title	Glitch Başlık
+	Navy	Lacivert
+	Ocean	Okyanus
+	Label Color	Etiket Rengi
+	Band Color	Bant Rengi
+	Scrolling Text	Kayan Metin
+	Information	Bilgi
+	Web Address	Web Adresi
+	Line Width	Çizgi Kalınlığı
+	Inner Frame Color	İç Çerçeve Rengi
+	Second Band Color	İkinci Bant Rengi
+	Highlight Shapes	Vurgu Şekilleri
+	Highlight Shape	Vurgu Şekli
+	Underline Marker	Alt Çizgi İşareti

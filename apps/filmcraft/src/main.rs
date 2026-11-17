@@ -355,12 +355,13 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
                         log::error!("{e}");
                     }
                 }
-                None => {
-                    let _ = session.execute("file.openDemoProject", json!({}));
-                }
+                // Easy Video Edit starts with an empty project when there is nothing recent to
+                // open (FilmCraft opens its demo here); the empty Timeline still offers the demo.
+                None => {}
             }
         } else if !startup_flag && session.prefs.general.at_startup == "emptyProject" {
-        } else if demo {
+        } else if demo && startup_flag {
+            // only with `--demo`: Easy Video Edit otherwise starts with an empty project
             let _ = session.execute("file.openDemoProject", json!({}));
         }
         if !media.is_empty() {

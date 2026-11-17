@@ -50,7 +50,11 @@ impl Source {
         matches!(self, Source::VideoTransitions | Source::AudioTransitions)
     }
     fn hint(self) -> &'static str {
-        if self.is_transition() { tl!("Double-click, or drag between two clips") } else { tl!("Double-click, or drag onto a clip in the timeline") }
+        if self.is_transition() {
+            tl!("Select a clip and double-click · or drag between two clips")
+        } else {
+            tl!("Select a clip and double-click · or drag onto a clip")
+        }
     }
 }
 
@@ -91,29 +95,38 @@ pub fn tabs(ui: &mut egui::Ui, t: &Tokens, rect: Rect, labels: &[&str], current:
 pub fn effects(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, src: Source) {
     let body = search(app, ui, rect);
     let q = app.ui.kurgu.search.trim().to_lowercase();
-    let cards: Vec<Card> = filmcraft_project::effect_defs()
+    let mut cards: Vec<Card> = filmcraft_project::effect_defs()
         .iter()
         .filter(|d| src.includes(d))
         .map(|d| Card {
             key: d.id.to_string(),
             label: crate::i18n::t(d.name).to_string(),
-            group: crate::i18n::t(d.category.get(1).copied().unwrap_or("Other")).to_string(),
+            group: if src == Source::VideoTransitions && POPULAR_TRANSITIONS.contains(&d.id) {
+                tl!("Most Used").to_string()
+            } else {
+                crate::i18n::t(d.category.get(1).copied().unwrap_or("Other")).to_string()
+            },
         })
-        .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q) || c.key.to_lowercase().contains(&q))
+        .filter(|c| q.is_empty() || matches(&q, &[&c.label, &c.key]))
         .collect();
+    // the most used transitions first, in the order of the list
+    if src == Source::VideoTransitions {
+        cards.sort_by_key(|c| POPULAR_TRANSITIONS.iter().position(|p| *p == c.key).unwrap_or(usize::MAX));
+    }
     let mut renders = 0usize;
-    let action = grid(app, ui, body, &cards, src.hint(), &mut |app, ui, card, r, hovered| {
+    let smp = sample(app, ui.ctx());
+    let action = grid(app, ui, body, &cards, src.hint(), false, &mut |app, ui, card, r, hovered| {
         if src.is_audio() {
             audio_tile(ui, &app.tokens, r, src.is_transition());
             return;
         }
         let step = if src.is_transition() { animation_step(ui, hovered) } else { STEPS / 2 };
-        let name = format!("kurgu-fx-{}-{step}", card.key);
+        let name = format!("kurgu-fx-{}-{step}-{}", card.key, smp.tag);
         let tex = match app.texture_existing(&name) {
             Some((id, _)) => Some(id),
             None if renders < RENDERS_PER_FRAME => {
                 renders += 1;
-                render_effect(&card.key, src.is_transition(), step).map(|img| upload(app, ui.ctx(), &name, &img))
+                render_effect(&card.key, src.is_transition(), step, &smp.img).map(|img| upload(app, ui.ctx(), &name, &img))
             }
             None => {
                 ui.ctx().request_repaint();
@@ -123,14 +136,73 @@ pub fn effects(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, src: Sourc
         paint_thumb(ui, &app.tokens, r, tex);
     });
     match action {
-        Some(Action::Apply(key)) => {
-            if let Err(e) = app.session.execute("effects.apply", json!({"effect": key})) {
-                app.ui.status = e.to_string();
-            }
-        }
+        Some(Action::Apply(key)) => apply_effect(app, &key),
         Some(Action::Drag(key)) => crate::panels::start_drag_effect(ui, &key),
         None => {}
     }
+}
+
+/// Transitions most editors reach for, shown first under "Most Used".
+const POPULAR_TRANSITIONS: &[&str] = &[
+    "cross_dissolve",
+    "dip_to_black",
+    "dip_to_white",
+    "blur_dissolve",
+    "film_dissolve",
+    "push",
+    "slide",
+    "zoom_blur",
+    "cross_zoom",
+    "whip",
+    "flash",
+    "light_leak",
+    "glitch",
+    "linear_wipe",
+];
+
+/// Applies an effect or transition to the selected clips; its settings open on the right.
+fn apply_effect(app: &mut FilmcraftApp, id: &str) {
+    if app.session.state.selection.is_empty() {
+        app.ui.status = tl!("Select a clip in the timeline first").to_string();
+        return;
+    }
+    match app.session.execute("effects.apply", json!({"effect": id})) {
+        Ok(_) => {
+            app.ui.kurgu.right_tab = 1;
+            // fold the fixed effects (Motion, Opacity, Time Remapping) so the one just added is in
+            // view in Effect Settings; they open again with a click
+            let mut keys = Vec::new();
+            if let Some(seq) = app.session.active_sequence() {
+                for clip in &app.session.state.selection {
+                    if let Some((_, it)) = seq.find_item(*clip) {
+                        for (i, e) in it.effects.iter().enumerate() {
+                            if e.def().is_some_and(|d| d.intrinsic) {
+                                keys.push(format!("{}:{i}", clip.0));
+                            }
+                        }
+                    }
+                }
+            }
+            for k in keys {
+                if !app.ui.collapsed_fx.contains(&k) {
+                    app.ui.collapsed_fx.push(k);
+                }
+            }
+        }
+        Err(e) => app.ui.status = e.to_string(),
+    }
+}
+
+/// Lower case for searching, with the Turkish dotted/dotless I folded, so "İ", "I", "ı" and "i"
+/// all match one another.
+fn fold(s: &str) -> String {
+    s.to_lowercase().replace("i\u{307}", "i").replace('ı', "i")
+}
+
+/// Whether every word of the query (already folded) is in one of the texts.
+fn matches(q: &str, texts: &[&str]) -> bool {
+    let hay: String = texts.iter().map(|t| fold(t)).collect::<Vec<_>>().join(" ");
+    fold(q).split_whitespace().all(|w| hay.contains(w))
 }
 
 /// The color looks (FilmCraft's Color Grading Presets) as a gallery.
@@ -144,14 +216,15 @@ pub fn color_looks(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q))
         .collect();
     let mut renders = 0usize;
-    let action = grid(app, ui, body, &cards, tl!("Double-click, or drag onto a clip in the timeline"), &mut |app, ui, card, r, _| {
-        let name = format!("kurgu-look-{}", card.key);
+    let smp = sample(app, ui.ctx());
+    let action = grid(app, ui, body, &cards, tl!("Select a clip and double-click · or drag onto a clip"), false, &mut |app, ui, card, r, _| {
+        let name = format!("kurgu-look-{}-{}", card.key, smp.tag);
         let tex = match app.texture_existing(&name) {
             Some((id, _)) => Some(id),
             None if renders < RENDERS_PER_FRAME => {
                 renders += 1;
                 let preset = card.key.strip_prefix(LOOK).and_then(|n| presets.iter().find(|p| p.name == n));
-                preset.map(|p| lp::thumbnail(p, THUMB_W, THUMB_H)).map(|img| upload(app, ui.ctx(), &name, &img))
+                preset.map(|p| render_look(p, &smp.img)).map(|img| upload(app, ui.ctx(), &name, &img))
             }
             None => {
                 ui.ctx().request_repaint();
@@ -228,16 +301,17 @@ pub fn texts(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, lib: Library
         .filter(|c| q.is_empty() || c.label.to_lowercase().contains(&q) || c.group.to_lowercase().contains(&q))
         .collect();
     let mut renders = 0usize;
-    let action = grid(app, ui, body, &cards, tl!("Double-click, or drag onto the timeline"), &mut |app, ui, card, r, hovered| {
+    let smp = sample(app, ui.ctx());
+    let action = grid(app, ui, body, &cards, tl!("Double-click: add at the playhead · or drag onto the timeline"), false, &mut |app, ui, card, r, hovered| {
         let step = text_step(ui, hovered);
         // the language is in the name: the sample text of a template follows it
-        let name = format!("kurgu-tpl-{}-{}-{step}", card.key, crate::i18n::current().bcp47());
+        let name = format!("kurgu-tpl-{}-{}-{step}-{}", card.key, crate::i18n::current().bcp47(), smp.tag);
         let tex = match app.texture_existing(&name) {
             Some((id, _)) => Some(id),
             None if renders < RENDERS_PER_FRAME => {
                 renders += 1;
                 let entry = library.iter().find(|e| e.template.id == card.key);
-                entry.map(|e| render_template(&e.template, step, lib.zoom(), lib.span())).map(|img| upload(app, ui.ctx(), &name, &img))
+                entry.map(|e| render_template(&e.template, step, lib.zoom(), lib.span(), &smp.img)).map(|img| upload(app, ui.ctx(), &name, &img))
             }
             None => {
                 ui.ctx().request_repaint();
@@ -297,8 +371,8 @@ fn text_step(ui: &egui::Ui, hovered: bool) -> usize {
 
 /// Renders a template over the dimmed sample picture at frame `step` of its intro
 /// (`TEXT_STEPS` = settled, one second in).
-fn render_template(t: &filmcraft_project::gtemplate::GraphicsTemplate, step: usize, zoom: f64, span: f64) -> Image {
-    let mut img = lp::preview_image(THUMB_W, THUMB_H);
+fn render_template(t: &filmcraft_project::gtemplate::GraphicsTemplate, step: usize, zoom: f64, span: f64, base: &Image) -> Image {
+    let mut img = base.clone();
     for (i, v) in img.px.iter_mut().enumerate() {
         if i % 4 != 3 {
             *v *= 0.55;
@@ -337,7 +411,8 @@ enum Action {
 type Thumb<'a> = dyn FnMut(&mut FilmcraftApp, &mut egui::Ui, &Card, Rect, bool) + 'a;
 
 /// Lays the cards out: Favorites first, then one section per group, in a vertical scroll area.
-fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], hint: &str, thumb: &mut Thumb<'_>) -> Option<Action> {
+/// `single`: one click applies a card (the Tools), otherwise a double click does.
+fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], hint: &str, single: bool, thumb: &mut Thumb<'_>) -> Option<Action> {
     let t = app.tokens;
     let hint_h = 22.0;
     let area = Rect::from_min_max(rect.min, pos2(rect.max.x, rect.max.y - hint_h));
@@ -371,7 +446,7 @@ fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], h
                     if !ui.is_rect_visible(cr) {
                         continue;
                     }
-                    if let Some(a) = draw_card(app, ui, card, cr, salt, thumb) {
+                    if let Some(a) = draw_card(app, ui, card, cr, salt, single, thumb) {
                         action = Some(a);
                     }
                 }
@@ -389,7 +464,7 @@ fn grid(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, cards: &[Card], h
 }
 
 /// One card: the thumbnail, its name, the favorite star; returns what the user did with it.
-fn draw_card(app: &mut FilmcraftApp, ui: &mut egui::Ui, card: &Card, r: Rect, salt: &str, thumb: &mut Thumb<'_>) -> Option<Action> {
+fn draw_card(app: &mut FilmcraftApp, ui: &mut egui::Ui, card: &Card, r: Rect, salt: &str, single: bool, thumb: &mut Thumb<'_>) -> Option<Action> {
     let t = app.tokens;
     let resp = ui.interact(r, egui::Id::unique(("kurgu-card", salt, card.key.as_str())), Sense::click_and_drag());
     let hovered = resp.hovered();
@@ -440,7 +515,7 @@ fn draw_card(app: &mut FilmcraftApp, ui: &mut egui::Ui, card: &Card, r: Rect, sa
     if resp.drag_started_by(egui::PointerButton::Primary) {
         return Some(Action::Drag(card.key.clone()));
     }
-    if resp.double_clicked() {
+    if resp.double_clicked() || (single && resp.clicked()) {
         return Some(Action::Apply(card.key.clone()));
     }
     None
@@ -511,29 +586,17 @@ fn audio_tile(ui: &egui::Ui, t: &Tokens, r: Rect, transition: bool) {
 
 /// Renders effect `id`: a transition between two sample pictures at frame `step`, or an effect
 /// over the sample picture.
-fn render_effect(id: &str, transition: bool, step: usize) -> Option<Image> {
+fn render_effect(id: &str, transition: bool, step: usize, base: &Image) -> Option<Image> {
     let def = filmcraft_project::effect_defs().iter().find(|d| d.id == id)?;
     let inst = def.instance();
-    let a = lp::preview_image(THUMB_W, THUMB_H);
+    let a = base.clone();
     if transition {
         let b = second_picture(&a);
         let p = step as f32 / (STEPS - 1) as f32;
         return Some(filmcraft_render::transitions::apply(&inst, &a, &b, p));
     }
     let mut img = a;
-    let cx = filmcraft_render::effects::FxCtx {
-        t: filmcraft_time::Tick::ZERO,
-        px_scale: THUMB_W as f32 / 1920.0,
-        mask_scale: THUMB_W as f32 / 1920.0,
-        seconds: 1.0,
-        timecode: "00:00:01:00",
-        clip_name: "",
-        project: None,
-        env: None,
-        frame_rate: 24.0,
-        working: filmcraft_color::WorkingSpace::Rec709,
-    };
-    filmcraft_render::effects::apply(&mut img, &inst, &cx);
+    filmcraft_render::effects::apply(&mut img, &inst, &fx_ctx());
     Some(img)
 }
 
@@ -567,4 +630,388 @@ fn upload(app: &mut FilmcraftApp, ctx: &egui::Context, name: &str, img: &Image) 
         draft: false,
     };
     app.texture_for(ctx, name, key, &rgba)
+}
+
+// ---------------------------------------------------------------- Sample picture
+
+/// The picture the previews are drawn on: a frame of the clip selected in the timeline (or of the
+/// video selected in Media), so an effect is shown on the user's own footage; FilmCraft's
+/// procedural landscape when nothing with a picture is selected or its frame is not decoded yet.
+#[derive(Clone)]
+pub struct Sample {
+    /// Part of every texture name, so the cards are drawn again when the picture changes.
+    tag: String,
+    img: std::sync::Arc<Image>,
+}
+
+/// Width the sample frame is asked for before it is cropped to the card.
+const SAMPLE_REQ_W: u32 = 320;
+
+pub fn sample(app: &mut FilmcraftApp, ctx: &egui::Context) -> Sample {
+    let cache_id = egui::Id::unique("kurgu-sample-picture");
+    let fallback = || {
+        let img = ctx.data_mut(|d| d.get_temp::<std::sync::Arc<Image>>(egui::Id::unique("kurgu-sample-landscape")));
+        let img = img.unwrap_or_else(|| {
+            let i = std::sync::Arc::new(lp::preview_image(THUMB_W, THUMB_H));
+            ctx.data_mut(|d| d.insert_temp(egui::Id::unique("kurgu-sample-landscape"), i.clone()));
+            i
+        });
+        Sample { tag: "demo".into(), img }
+    };
+    // the item and media time to show
+    let mut pick: Option<(filmcraft_project::ItemId, filmcraft_time::Tick)> = None;
+    if let Some(seq) = app.session.active_sequence() {
+        for clip in &app.session.state.selection {
+            if let Some((_, it)) = seq.find_item(*clip) {
+                let has_video = app.session.project.item(it.item).is_some_and(|p| p.has_video());
+                if has_video {
+                    let half = filmcraft_time::Tick(it.duration.0 / 2);
+                    pick = Some((it.item, filmcraft_time::Tick(it.source_in.0.saturating_add(half.0.max(0)))));
+                    break;
+                }
+            }
+        }
+    }
+    if pick.is_none() {
+        pick = app.session.state.project_selection.iter().find_map(|i| {
+            let it = app.session.project.item(*i)?;
+            it.has_video().then(|| (*i, filmcraft_time::Tick(it.duration().0 / 3)))
+        });
+    }
+    let Some((item, at)) = pick else { return fallback() };
+    let Some(pitem) = app.session.project.item(item) else { return fallback() };
+    let rate = pitem.frame_rate();
+    let src_w = pitem.as_media().and_then(|m| m.info.video.as_ref()).map_or(1920, |v| v.width).max(1);
+    let at = at.min(filmcraft_time::Tick(pitem.duration().0.saturating_sub(1).max(0)));
+    let frame = rate.frame_at(crate::panels::project::quantize(at));
+    let key = crate::frames::FrameKey { target: crate::frames::Target::Item(item), frame, size: SAMPLE_REQ_W, revision: app.item_revision(item), draft: false };
+    let tag = format!("{}-{}-{}", item.0, frame, key.revision);
+    if let Some(s) = ctx.data_mut(|d| d.get_temp::<Sample>(cache_id)).filter(|s| s.tag == tag) {
+        return s;
+    }
+    let Some(rgba) = app.frames.get(&key) else {
+        let proj = app.session.project.clone();
+        app.frames.request(key, rate.tick_of(frame), SAMPLE_REQ_W as f32 / src_w as f32, &proj, 40);
+        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        return fallback();
+    };
+    let Some(img) = fill_card(&rgba) else { return fallback() };
+    let s = Sample { tag, img: std::sync::Arc::new(img) };
+    ctx.data_mut(|d| d.insert_temp(cache_id, s.clone()));
+    s
+}
+
+/// A decoded frame scaled and cropped to fill a card, as linear light.
+fn fill_card(f: &crate::frames::Rgba) -> Option<Image> {
+    if f.w == 0 || f.h == 0 || f.px.len() < f.w.checked_mul(f.h)?.checked_mul(4)? {
+        return None;
+    }
+    let mut src = Image::new(f.w, f.h);
+    for (d, s) in src.px.as_chunks_mut::<4>().0.iter_mut().zip(f.px.as_chunks::<4>().0) {
+        d[0] = filmcraft_color::srgb_to_linear(f32::from(s[0]) / 255.0);
+        d[1] = filmcraft_color::srgb_to_linear(f32::from(s[1]) / 255.0);
+        d[2] = filmcraft_color::srgb_to_linear(f32::from(s[2]) / 255.0);
+        d[3] = 1.0;
+    }
+    // cover the card: the larger scale, centred
+    let k = (THUMB_W as f32 / f.w as f32).max(THUMB_H as f32 / f.h as f32);
+    let (ox, oy) = ((f.w as f32 * k - THUMB_W as f32) / 2.0, (f.h as f32 * k - THUMB_H as f32) / 2.0);
+    let mut out = Image::new(THUMB_W, THUMB_H);
+    for y in 0..THUMB_H {
+        for x in 0..THUMB_W {
+            let (sx, sy) = ((x as f32 + 0.5 + ox) / k - 0.5, (y as f32 + 0.5 + oy) / k - 0.5);
+            let p = src.sample_bilinear_clamped(sx, sy);
+            let i = (y * THUMB_W + x) * 4;
+            if let Some(d) = out.px.get_mut(i..i + 4) {
+                d.copy_from_slice(&[p[0], p[1], p[2], 1.0]);
+            }
+        }
+    }
+    Some(out)
+}
+
+/// A color look over the sample picture.
+fn render_look(p: &LumetriPreset, base: &Image) -> Image {
+    let mut img = base.clone();
+    filmcraft_render::effects::apply(&mut img, &p.instance(), &fx_ctx());
+    img
+}
+
+fn fx_ctx() -> filmcraft_render::effects::FxCtx<'static> {
+    filmcraft_render::effects::FxCtx {
+        t: filmcraft_time::Tick::ZERO,
+        px_scale: THUMB_W as f32 / 1920.0,
+        mask_scale: THUMB_W as f32 / 1920.0,
+        seconds: 1.0,
+        timecode: "00:00:01:00",
+        clip_name: "",
+        project: None,
+        env: None,
+        frame_rate: 24.0,
+        working: filmcraft_color::WorkingSpace::Rec709,
+    }
+}
+
+// ---------------------------------------------------------------- Tools
+
+/// One of the Tools: an effect applied to the selected clips (its settings open on the right), a
+/// menu command, or a tool still being prepared.
+pub struct ToolDef {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub icon: Icon,
+    pub group: &'static str,
+    pub effect: Option<&'static str>,
+    pub command: Option<&'static str>,
+    pub soon: bool,
+    /// Extra words it is found by in the search, English and Turkish.
+    pub keywords: &'static str,
+}
+
+const fn tool(key: &'static str, label: &'static str, icon: Icon, group: &'static str, effect: &'static str, keywords: &'static str) -> ToolDef {
+    ToolDef { key, label, icon, group, effect: Some(effect), command: None, soon: false, keywords }
+}
+
+pub const TOOLS: &[ToolDef] = &[
+    tool(
+        "tool:chroma",
+        "Chroma Key",
+        Icon::Eyedropper,
+        "Background",
+        "ultra_key",
+        "chroma key green screen blue screen ultra key replace background krom anahtar anahtarı yeşil perde yeşil ekran mavi perde arka plan değiştir",
+    ),
+    tool("tool:colorkey", "Color Key", Icon::Eyedropper, "Background", "color_key", "color key remove color renk anahtarı rengi kaldır arka plan"),
+    tool(
+        "tool:lumakey",
+        "Luma Key",
+        Icon::Sun,
+        "Background",
+        "luma_key",
+        "luma key brightness key remove black white parlaklık anahtarı siyahı kaldır beyazı kaldır",
+    ),
+    ToolDef {
+        key: "tool:bgremove",
+        label: "Background Removal",
+        icon: Icon::Sparkle,
+        group: "Background",
+        effect: None,
+        command: None,
+        soon: true,
+        keywords: "background removal remove background person cutout arka plan kaldır arka planı sil kişi seç dekupe yapay zeka",
+    },
+    tool("tool:stabilize", "Stabilize", Icon::Camera, "Picture", "warp_stabilizer", "stabilize stabilizer warp shake sabitle sabitleme titreme sarsıntı"),
+    tool("tool:crop", "Crop", Icon::Square, "Picture", "crop", "crop trim edges kırp kenar"),
+    tool("tool:fliph", "Flip Horizontal", Icon::Slide, "Picture", "horizontal_flip", "flip mirror horizontal ayna çevir yatay"),
+    tool("tool:flipv", "Flip Vertical", Icon::Rolling, "Picture", "vertical_flip", "flip vertical upside down dikey çevir ters"),
+    tool("tool:blur", "Blur", Icon::Adjust, "Picture", "gaussian_blur", "blur soften gaussian bulanık bulanıklaştır flu"),
+    tool("tool:mosaic", "Mosaic", Icon::Grid, "Picture", "mosaic", "mosaic pixelate censor hide face plate mozaik piksel sansür yüz gizle plaka"),
+    tool("tool:sharpen", "Sharpen", Icon::Sparkle, "Picture", "sharpen", "sharpen detail keskinleştir netleştir"),
+    tool("tool:glow", "Glow", Icon::Sun, "Style", "glow", "glow shine light parlama ışıma ışık"),
+    tool("tool:shadow", "Drop Shadow", Icon::Square, "Style", "drop_shadow", "drop shadow gölge"),
+    ToolDef {
+        key: "tool:speed",
+        label: "Speed",
+        icon: Icon::Clock,
+        group: "Motion and Time",
+        effect: None,
+        command: Some("clip.speedDuration"),
+        soon: false,
+        keywords: "speed duration slow motion fast reverse hız süre yavaş çekim hızlandır ters oynat geri",
+    },
+    ToolDef {
+        key: "tool:track",
+        label: "Object Tracking",
+        icon: Icon::TrackMaskFwd,
+        group: "Motion and Time",
+        effect: None,
+        command: None,
+        soon: true,
+        keywords: "object tracking motion tracking follow nesne takibi takip izle hareket takibi",
+    },
+];
+
+fn tool_def(key: &str) -> Option<&'static ToolDef> {
+    TOOLS.iter().find(|t| t.key == key)
+}
+
+fn tool_matches(t: &ToolDef, q: &str) -> bool {
+    q.is_empty() || matches(q, &[crate::i18n::t(t.label), t.label, t.keywords, crate::i18n::t(t.group)])
+}
+
+/// The Tools as big cards; one click applies a tool to the selected clips.
+pub fn tools(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
+    let body = search(app, ui, rect);
+    let q = app.ui.kurgu.search.trim().to_string();
+    let cards: Vec<Card> = TOOLS
+        .iter()
+        .filter(|t| tool_matches(t, &q))
+        .map(|t| Card { key: t.key.to_string(), label: crate::i18n::t(t.label).to_string(), group: crate::i18n::t(t.group).to_string() })
+        .collect();
+    let action = grid(app, ui, body, &cards, tl!("Select a clip in the timeline, then click a tool"), true, &mut |app, ui, card, r, hovered| {
+        tool_tile(ui, &app.tokens, r, card, hovered);
+    });
+    if let Some(Action::Apply(key)) = action {
+        apply_tool(app, ui.ctx(), &key);
+    }
+}
+
+/// A tool's card picture: its icon on a tile, marked while the tool is being prepared.
+fn tool_tile(ui: &egui::Ui, t: &Tokens, r: Rect, card: &Card, hovered: bool) {
+    let p = ui.painter();
+    p.rect_filled(r, CornerRadius::same(6), if hovered { t.hover } else { t.field_bg });
+    let Some(def) = tool_def(&card.key) else { return };
+    let s = (r.height() * 0.42).clamp(18.0, 56.0);
+    icons::paint(p, Rect::from_center_size(r.center(), vec2(s, s)), def.icon, if def.soon { t.text_faint } else { t.accent });
+    if def.soon {
+        let badge = Rect::from_min_size(r.min + vec2(6.0, 6.0), vec2(58.0, 18.0));
+        p.rect_filled(badge, CornerRadius::same(9), Color32::from_black_alpha(150));
+        p.text(badge.center(), Align2::CENTER_CENTER, tl!("Soon"), Tokens::ui(10.5), Color32::WHITE);
+    }
+}
+
+/// Runs a tool on the selected clips.
+fn apply_tool(app: &mut FilmcraftApp, ctx: &egui::Context, key: &str) {
+    let Some(def) = tool_def(key) else { return };
+    if def.soon {
+        app.ui.status = tlf!("{tool}: coming soon", tool = crate::i18n::t(def.label));
+        return;
+    }
+    if let Some(id) = def.effect {
+        apply_effect(app, id);
+    } else if let Some(cmd) = def.command {
+        if app.session.state.selection.is_empty() {
+            app.ui.status = tl!("Select a clip in the timeline first").to_string();
+        } else if let Err(e) = crate::menus::invoke(app, ctx, cmd, json!({})) {
+            app.ui.status = e;
+        }
+    }
+}
+
+// ---------------------------------------------------------------- search everywhere
+
+/// What a search result is; decides its picture and what applying it does.
+enum Kind<'a> {
+    Tool,
+    Look(&'a LumetriPreset),
+    Effect { transition: bool, audio: bool },
+    Template(&'a filmcraft_engine::graphic_templates::LibraryEntry, Library),
+}
+
+/// Results of the search in the top bar: tools, effects, transitions, texts, elements, intros and
+/// color looks whose name (in either language), folder or keywords hold every word of `query`.
+pub fn search_all(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, query: &str) {
+    let q = query.trim();
+    let library = template_library(app, ui.ctx());
+    let presets: Vec<LumetriPreset> = lp::presets();
+    let mut cards: Vec<Card> = Vec::new();
+    for t in TOOLS.iter().filter(|t| tool_matches(t, q)) {
+        cards.push(Card { key: t.key.to_string(), label: crate::i18n::t(t.label).to_string(), group: crate::i18n::t("Tools").to_string() });
+    }
+    for (src, group) in
+        [(Source::VideoTransitions, "Transitions"), (Source::VideoEffects, "Effects"), (Source::AudioEffects, "Audio"), (Source::AudioTransitions, "Audio")]
+    {
+        for d in filmcraft_project::effect_defs().iter().filter(|d| src.includes(d)) {
+            let folder = d.category.get(1).copied().unwrap_or("");
+            if matches(q, &[crate::i18n::t(d.name), d.name, d.id, crate::i18n::t(folder), folder]) {
+                cards.push(Card { key: d.id.to_string(), label: crate::i18n::t(d.name).to_string(), group: crate::i18n::t(group).to_string() });
+            }
+        }
+    }
+    for (lib, group) in [(Library::Texts, "Text"), (Library::Elements, "Elements"), (Library::Intros, "Intros")] {
+        for e in library.iter().filter(|e| lib.includes(&e.template.id)) {
+            let (name, cat) = (translate_parts(&e.template.name), translate_parts(&e.template.category));
+            if matches(q, &[&name, &cat, &e.template.name, &e.template.category]) {
+                cards.push(Card { key: e.template.id.clone(), label: name, group: crate::i18n::t(group).to_string() });
+            }
+        }
+    }
+    for p in &presets {
+        if matches(q, &[crate::i18n::t(p.name), p.name, crate::i18n::t(p.folder), "color look renk görünüm"]) {
+            cards.push(Card { key: format!("{LOOK}{}", p.name), label: crate::i18n::t(p.name).to_string(), group: crate::i18n::t("Looks").to_string() });
+        }
+    }
+    let kind_of = |key: &str| -> Option<Kind<'_>> {
+        if tool_def(key).is_some() {
+            return Some(Kind::Tool);
+        }
+        if let Some(name) = key.strip_prefix(LOOK) {
+            return presets.iter().find(|p| p.name == name).map(Kind::Look);
+        }
+        if let Some(d) = filmcraft_project::effect_defs().iter().find(|d| d.id == key) {
+            let transition = matches!(d.kind, EffectKind::VideoTransition | EffectKind::AudioTransition);
+            let audio = matches!(d.kind, EffectKind::Audio | EffectKind::AudioTransition);
+            return Some(Kind::Effect { transition, audio });
+        }
+        let e = library.iter().find(|e| e.template.id == key)?;
+        let lib = [Library::Elements, Library::Intros].into_iter().find(|l| l.includes(key)).unwrap_or(Library::Texts);
+        Some(Kind::Template(e, lib))
+    };
+    let mut renders = 0usize;
+    let smp = sample(app, ui.ctx());
+    let action = grid(app, ui, rect, &cards, tl!("Double-click to use · or drag onto the timeline"), false, &mut |app, ui, card, r, hovered| {
+        let Some(kind) = kind_of(&card.key) else { return };
+        let (name, render): (String, Box<dyn Fn() -> Option<Image> + '_>) = match kind {
+            Kind::Tool => {
+                tool_tile(ui, &app.tokens, r, card, hovered);
+                return;
+            }
+            Kind::Effect { audio: true, transition } => {
+                audio_tile(ui, &app.tokens, r, transition);
+                return;
+            }
+            Kind::Effect { transition, .. } => {
+                let step = if transition { animation_step(ui, hovered) } else { STEPS / 2 };
+                let key = card.key.clone();
+                let base = smp.img.clone();
+                (format!("kurgu-fx-{}-{step}-{}", card.key, smp.tag), Box::new(move || render_effect(&key, transition, step, &base)))
+            }
+            Kind::Look(p) => {
+                let base = smp.img.clone();
+                (format!("kurgu-look-{}-{}", card.key, smp.tag), Box::new(move || Some(render_look(p, &base))))
+            }
+            Kind::Template(e, lib) => {
+                let step = text_step(ui, hovered);
+                let name = format!("kurgu-tpl-{}-{}-{step}-{}", card.key, crate::i18n::current().bcp47(), smp.tag);
+                let base = smp.img.clone();
+                (name, Box::new(move || Some(render_template(&e.template, step, lib.zoom(), lib.span(), &base))))
+            }
+        };
+        let tex = match app.texture_existing(&name) {
+            Some((id, _)) => Some(id),
+            None if renders < RENDERS_PER_FRAME => {
+                renders += 1;
+                render().map(|img| upload(app, ui.ctx(), &name, &img))
+            }
+            None => {
+                ui.ctx().request_repaint();
+                None
+            }
+        };
+        paint_thumb(ui, &app.tokens, r, tex);
+    });
+    match action {
+        Some(Action::Apply(key)) => match kind_of(&key) {
+            Some(Kind::Tool) => apply_tool(app, ui.ctx(), &key),
+            Some(Kind::Look(p)) => {
+                if let Err(e) = app.session.execute("lumetri.applyPreset", json!({"name": p.name})) {
+                    app.ui.status = e.to_string();
+                }
+            }
+            Some(Kind::Effect { .. }) => apply_effect(app, &key),
+            Some(Kind::Template(..)) => {
+                if let Err(e) = app.session.execute("graphics.template.apply", json!({"template": key})) {
+                    app.ui.status = e.to_string();
+                }
+            }
+            None => {}
+        },
+        Some(Action::Drag(key)) => match kind_of(&key) {
+            Some(Kind::Look(p)) => crate::panels::start_drag_lumetri_preset(ui, p.name),
+            Some(Kind::Effect { .. }) => crate::panels::start_drag_effect(ui, &key),
+            Some(Kind::Template(e, _)) => crate::panels::start_drag_template(ui, &key, &e.template.name),
+            _ => {}
+        },
+        None => {}
+    }
 }

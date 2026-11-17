@@ -196,6 +196,13 @@ impl FilmcraftApp {
         Ok(())
     }
 
+    /// Records where panels were drawn outside the dock area (Easy Video Edit's simple layout), so
+    /// drop-target checks such as [`Self::timeline_drop_target`] use this layout, not the bodies the
+    /// dock area left behind the last time it was shown.
+    pub(crate) fn record_panel_bodies(ctx: &egui::Context, bodies: Vec<(PanelKind, Rect, egui::LayerId)>) {
+        ctx.data_mut(|data| data.insert_temp(bodies_id(), bodies));
+    }
+
     /// OS drag positions come from the host cursor hook, so egui pointer capture alone cannot
     /// decide whether a Timeline is covered: the Timeline body drawn last frame must hold `pos`,
     /// with no floating window above it there.

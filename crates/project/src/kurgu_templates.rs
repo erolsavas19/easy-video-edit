@@ -278,6 +278,7 @@ fn ctl(id: &str, name: &str, layer: u64, param: &str) -> TemplateControl {
 }
 
 /// A template from its layers: animated, with the intro and outro protected.
+#[allow(clippy::too_many_arguments)]
 fn template(
     id: String,
     name: String,
@@ -320,6 +321,9 @@ fn text_controls(texts: &[(u64, &str)], color_layer: u64, boxed: Option<u64>) ->
 /// All of Easy Video Edit's text templates.
 pub fn templates() -> Vec<GraphicsTemplate> {
     let mut v = Vec::new();
+    // the broadcast graphics and stylish titles first: the ones most asked for
+    news(&mut v);
+    stylish(&mut v);
     titles(&mut v);
     subtitles(&mut v);
     lower_thirds(&mut v);
@@ -727,8 +731,8 @@ fn elements(v: &mut Vec<GraphicsTemplate>) {
         outline_only(&mut c, 0xef4444, 14.0);
         v.push(element(
             "vurgu-daire",
-            "Highlight · Circle".into(),
-            "Highlights",
+            "Highlight Shape · Circle".into(),
+            HIGHLIGHT,
             4.0,
             vec![c],
             Anim::Pop,
@@ -739,8 +743,8 @@ fn elements(v: &mut Vec<GraphicsTemplate>) {
         outline_only(&mut r, 0xfacc15, 14.0);
         v.push(element(
             "vurgu-cerceve",
-            "Highlight · Outline Box".into(),
-            "Highlights",
+            "Highlight Shape · Outline Box".into(),
+            HIGHLIGHT,
             4.0,
             vec![r],
             Anim::Pop,
@@ -750,8 +754,8 @@ fn elements(v: &mut Vec<GraphicsTemplate>) {
         let u = rect(1, "Underline", (960.0, 610.0), (560.0, 18.0), 0xef4444, 9.0);
         v.push(element(
             "vurgu-alt-cizgi",
-            "Highlight · Underline".into(),
-            "Highlights",
+            "Highlight Shape · Underline".into(),
+            HIGHLIGHT,
             4.0,
             vec![u],
             Anim::SlideLeft,
@@ -762,8 +766,8 @@ fn elements(v: &mut Vec<GraphicsTemplate>) {
         set(&mut m, "fill_color", ParamValue::Color([0.99, 0.88, 0.28, 0.45]));
         v.push(element(
             "vurgu-isaretleyici",
-            "Highlight · Highlighter".into(),
-            "Highlights",
+            "Highlight Shape · Highlighter".into(),
+            HIGHLIGHT,
             4.0,
             vec![m],
             Anim::SlideLeft,
@@ -1117,6 +1121,719 @@ fn intros(v: &mut Vec<GraphicsTemplate>) {
         ],
         intro_controls(Some(1)),
     ));
+}
+
+// ------------------------------------------------------------------------------------------------
+// News & broadcast graphics and stylish titles: full-width straps, tickers, announcement bars, info
+// bars, screen frames, highlight shapes, ribbons, slanted bands, bracketed and glitch titles. Original
+// designs in the common broadcast idiom, built from shape and text layers, each with its own entrance
+// (bars open from the middle, labels slide in, text crawls right to left).
+// ------------------------------------------------------------------------------------------------
+
+/// The protected opening of a broadcast graphic: its last layer has settled by then.
+const NEWS_INTRO: f64 = 1.2;
+
+#[allow(clippy::too_many_arguments)]
+fn broadcast(
+    id: &str,
+    name: String,
+    category: &str,
+    description: &str,
+    seconds: f64,
+    layers: Vec<EffectInstance>,
+    controls: Vec<TemplateControl>,
+) -> GraphicsTemplate {
+    let graphic = GraphicMeta { intro: secs(NEWS_INTRO), outro: secs(OUTRO), design_in: Tick::ZERO, design_duration: secs(seconds), ..Default::default() };
+    GraphicsTemplate {
+        // highlight shapes go with the other highlights in Elements
+        id: if category == HIGHLIGHT { format!("{ELEMENT_PREFIX}vurgu-{id}") } else { format!("easyvideoedit:haber-{id}") },
+        name,
+        category: category.into(),
+        description: description.into(),
+        author: "Easy Video Edit".into(),
+        license: "MIT OR Apache-2.0".into(),
+        tags: vec![category.to_lowercase(), "broadcast".into(), "news".into()],
+        duration: secs(seconds),
+        layers,
+        graphic,
+        controls,
+        ..Default::default()
+    }
+}
+
+/// Fades in at `delay` and out over the last [`OUTRO`] seconds of a `seconds`-long clip.
+fn appear(e: &mut EffectInstance, delay: f64, seconds: f64) {
+    use Interpolation::Linear;
+    let f = |v: f64| ParamValue::Float(v);
+    let out = (seconds - OUTRO).max(delay + 0.3);
+    let mut frames = Vec::new();
+    if delay > 0.0 {
+        frames.push((0.0, f(0.0), Linear));
+    }
+    frames.extend([(delay, f(0.0), Linear), (delay + 0.25, f(100.0), Linear), (out, f(100.0), Linear), (seconds, f(0.0), Linear)]);
+    keys(e, "opacity", f(100.0), &frames);
+}
+
+/// Slides in from `(dx, dy)` away, starting at `delay`.
+fn slide_from(e: &mut EffectInstance, dx: f64, dy: f64, delay: f64) {
+    let p = position_of(e);
+    let from = Vec2::new(p.x + dx, p.y + dy);
+    keys(
+        e,
+        "position",
+        ParamValue::Vec2(p),
+        &[(delay, ParamValue::Vec2(from), Interpolation::EaseOut), (delay + 0.5, ParamValue::Vec2(p), Interpolation::Linear)],
+    );
+}
+
+/// Opens from its middle to full width, starting at `delay` (a shape layer).
+fn open_wide(e: &mut EffectInstance, delay: f64) {
+    set(e, "uniform_scale", ParamValue::Bool(false));
+    keys(
+        e,
+        "scale_width",
+        ParamValue::Float(100.0),
+        &[(delay, ParamValue::Float(0.0), Interpolation::EaseOut), (delay + 0.45, ParamValue::Float(100.0), Interpolation::Linear)],
+    );
+}
+
+/// Pops in at `delay`: grows past its size and settles.
+fn pop_in(e: &mut EffectInstance, delay: f64) {
+    keys(
+        e,
+        "scale",
+        ParamValue::Float(100.0),
+        &[
+            (delay, ParamValue::Float(30.0), Interpolation::EaseOut),
+            (delay + 0.3, ParamValue::Float(110.0), Interpolation::Linear),
+            (delay + 0.45, ParamValue::Float(100.0), Interpolation::Linear),
+        ],
+    );
+}
+
+/// A soft shadow under a shape.
+fn shadowed(mut e: EffectInstance, color: u32, opacity: f64) -> EffectInstance {
+    set(&mut e, "shadow", ParamValue::Bool(true));
+    set(&mut e, "shadow_color", rgb(color));
+    set(&mut e, "shadow_opacity", ParamValue::Float(opacity));
+    set(&mut e, "shadow_distance", ParamValue::Float(6.0));
+    set(&mut e, "shadow_blur", ParamValue::Float(22.0));
+    e
+}
+
+/// A linear gradient fill, `a` to `b` at `angle` degrees.
+fn gradient_fill(mut e: EffectInstance, a: u32, b: u32, angle: f64) -> EffectInstance {
+    set(&mut e, "fill_kind", ParamValue::Choice(1));
+    set(&mut e, "gradient_start", rgb(a));
+    set(&mut e, "gradient_end", rgb(b));
+    set(&mut e, "gradient_angle", ParamValue::Float(angle));
+    e
+}
+
+/// A slanted band (parallelogram) centred at `pos`; `skew` is how far the top edge leans right.
+fn slant(uid: u64, name: &str, pos: (f64, f64), size: (f64, f64), skew: f64, color: u32) -> EffectInstance {
+    let (w, h, k) = ((size.0 / 2.0) as f32, (size.1 / 2.0) as f32, (skew / 2.0) as f32);
+    let pts = vec![[-w + k, -h], [w + k, -h], [w - k, h], [-w - k, h]];
+    let mut e = new_shape_layer(3, Vec2::new(pos.0, pos.1), Vec2::new(size.0 + skew.abs(), size.1), pts);
+    set(&mut e, "name", ParamValue::Text(name.into()));
+    set(&mut e, "fill_color", rgb(color));
+    e.layer = Some(Box::new(LayerExtra { uid, ..Default::default() }));
+    e
+}
+
+/// A corner bracket (an L) with its corner at `at`, arms `arm` long and `thick` wide, opening
+/// towards `(sx, sy)` (each ±1).
+#[allow(clippy::too_many_arguments)]
+fn bracket(uid: u64, name: &str, at: (f64, f64), arm: f64, thick: f64, sx: f64, sy: f64, color: u32) -> EffectInstance {
+    let (a, t, sx, sy) = (arm as f32, thick as f32, sx as f32, sy as f32);
+    let pts = vec![[0.0, 0.0], [sx * a, 0.0], [sx * a, sy * t], [sx * t, sy * t], [sx * t, sy * a], [0.0, sy * a]];
+    let mut e = new_shape_layer(3, Vec2::new(at.0, at.1), Vec2::new(arm, arm), pts);
+    set(&mut e, "name", ParamValue::Text(name.into()));
+    set(&mut e, "fill_color", rgb(color));
+    e.layer = Some(Box::new(LayerExtra { uid, ..Default::default() }));
+    e
+}
+
+/// The four corner brackets of a `w` × `h` box centred at `c`.
+fn brackets(first_uid: u64, c: (f64, f64), w: f64, h: f64, arm: f64, thick: f64, color: u32) -> Vec<EffectInstance> {
+    let (x0, x1, y0, y1) = (c.0 - w / 2.0, c.0 + w / 2.0, c.1 - h / 2.0, c.1 + h / 2.0);
+    vec![
+        bracket(first_uid, "Corner", (x0, y0), arm, thick, 1.0, 1.0, color),
+        bracket(first_uid + 1, "Corner", (x1, y0), arm, thick, -1.0, 1.0, color),
+        bracket(first_uid + 2, "Corner", (x0, y1), arm, thick, 1.0, -1.0, color),
+        bracket(first_uid + 3, "Corner", (x1, y1), arm, thick, -1.0, -1.0, color),
+    ]
+}
+
+/// A text style for broadcast graphics.
+const fn news_style(font: &'static str, font_style: &'static str, fill: u32) -> Style {
+    style("haber", "News", font, font_style, fill)
+}
+
+/// Baseline of `size`-pixel text whose middle is at `mid`.
+fn baseline(mid: f64, size: f64) -> f64 {
+    mid + size * 0.36
+}
+
+const NEWS: &str = "News & Broadcast";
+const STYLISH: &str = "Stylish Titles";
+const HIGHLIGHT: &str = "Highlight Shapes";
+
+fn news(v: &mut Vec<GraphicsTemplate>) {
+    let white = news_style("Poppins", "Bold", 0xffffff);
+    let white_semi = news_style("Poppins", "SemiBold", 0xffffff);
+    let anton = news_style("Anton", "Regular", 0xffffff);
+    let dark = news_style("Poppins", "SemiBold", 0x111827);
+
+    // Breaking news strap: a full-width dark band with a coloured label on the left.
+    for (cid, cname, color) in [("kirmizi", "Red", 0xdc2626), ("mavi", "Blue", 0x1d4ed8), ("turuncu", "Orange", 0xea580c)] {
+        let secs_ = 8.0;
+        let mut rule = rect(1, "Line", (960.0, 887.0), (1920.0, 6.0), color, 0.0);
+        let mut band = shadowed(rect(2, "Band", (960.0, 950.0), (1920.0, 120.0), 0x0f172a, 0.0), 0x000000, 60.0);
+        let mut label = rect(3, "Label Box", (190.0, 950.0), (380.0, 120.0), color, 0.0);
+        let mut label_t = text(4, "Label", s("BREAKING NEWS", "SON DAKİKA"), (190.0, baseline(950.0, 54.0)), 54.0, &anton, 1);
+        let mut head = text(5, "Headline", s("Your headline goes here", "Haber başlığı buraya yazılır"), (420.0, baseline(950.0, 50.0)), 50.0, &white, 0);
+        open_wide(&mut rule, 0.0);
+        open_wide(&mut band, 0.0);
+        slide_from(&mut label, -420.0, 0.0, 0.25);
+        slide_from(&mut label_t, -420.0, 0.0, 0.25);
+        slide_from(&mut head, 0.0, 40.0, 0.55);
+        for (e, d) in [(&mut rule, 0.0), (&mut band, 0.0), (&mut label, 0.25), (&mut label_t, 0.25), (&mut head, 0.55)] {
+            appear(e, d, secs_);
+        }
+        v.push(broadcast(
+            &format!("sondakika-{cid}"),
+            format!("Breaking News · {cname}"),
+            NEWS,
+            "A full-width news strap with a label on the left.",
+            secs_,
+            vec![rule, band, label, label_t, head],
+            vec![
+                ctl("headline", "Headline", 5, "text"),
+                ctl("label", "Label", 4, "text"),
+                ctl("label_color", "Label Color", 3, "fill_color"),
+                ctl("band", "Band Color", 2, "fill_color"),
+                ctl("text_color", "Text Color", 5, "fill_color"),
+            ],
+        ));
+    }
+
+    // Ticker: text crawling right to left along the bottom, behind a fixed label.
+    for (cid, cname, band_c, label_c, text_c) in
+        [("kirmizi", "Red", 0x0f172a, 0xdc2626, 0xffffff), ("mavi", "Blue", 0x0b2545, 0x2563eb, 0xffffff), ("sari", "Yellow", 0xfacc15, 0x111827, 0x111827)]
+    {
+        let secs_ = 15.0;
+        let msg = s(
+            "Scrolling news text · Add your announcements here · They move from right to left · ",
+            "Kayan haber metni · Duyurularınızı buraya yazın · Sağdan sola doğru akar · ",
+        );
+        let size = 40.0;
+        let y = 1032.0;
+        let mut band = shadowed(rect(1, "Band", (960.0, y), (1920.0, 76.0), band_c, 0.0), 0x000000, 50.0);
+        let mut crawl = text(2, "Scrolling Text", msg, (1500.0, baseline(y, size)), size, &news_style("Poppins", "SemiBold", text_c), 0);
+        let len = msg.chars().count() as f64 * size * 0.52;
+        keys(
+            &mut crawl,
+            "position",
+            ParamValue::Vec2(Vec2::new(1500.0, baseline(y, size))),
+            &[
+                (0.0, ParamValue::Vec2(Vec2::new(1500.0, baseline(y, size))), Interpolation::Linear),
+                (secs_, ParamValue::Vec2(Vec2::new(300.0 - len, baseline(y, size))), Interpolation::Linear),
+            ],
+        );
+        let mut label = rect(3, "Label Box", (130.0, y), (260.0, 76.0), label_c, 0.0);
+        let label_style = news_style("Anton", "Regular", if label_c == 0x111827 { 0xfacc15 } else { 0xffffff });
+        let mut label_t = text(4, "Label", s("NEWS", "HABERLER"), (130.0, baseline(y, 44.0)), 44.0, &label_style, 1);
+        open_wide(&mut band, 0.0);
+        slide_from(&mut label, -300.0, 0.0, 0.2);
+        slide_from(&mut label_t, -300.0, 0.0, 0.2);
+        for (e, d) in [(&mut band, 0.0), (&mut crawl, 0.3), (&mut label, 0.2), (&mut label_t, 0.2)] {
+            appear(e, d, secs_);
+        }
+        v.push(broadcast(
+            &format!("kayan-yazi-{cid}"),
+            format!("Ticker · {cname}"),
+            NEWS,
+            "Text crawling right to left along the bottom of the picture.",
+            secs_,
+            vec![band, crawl, label, label_t],
+            vec![
+                ctl("text", "Scrolling Text", 2, "text"),
+                ctl("label", "Label", 4, "text"),
+                ctl("label_color", "Label Color", 3, "fill_color"),
+                ctl("band", "Band Color", 1, "fill_color"),
+                ctl("text_color", "Text Color", 2, "fill_color"),
+            ],
+        ));
+    }
+
+    // Announcement: a coloured tab saying ANNOUNCEMENT over a light information bar.
+    for (cid, cname, color) in [("turuncu", "Orange", 0xf97316), ("kirmizi", "Red", 0xdc2626), ("yesil", "Green", 0x16a34a), ("mavi", "Blue", 0x2563eb)] {
+        let secs_ = 8.0;
+        let mut tab = rect(1, "Tab", (250.0, 838.0), (340.0, 66.0), color, 8.0);
+        let mut tab_t = text(2, "Label", s("ANNOUNCEMENT", "DUYURU"), (250.0, baseline(838.0, 44.0)), 44.0, &anton, 1);
+        let mut bar = shadowed(rect(3, "Bar", (900.0, 930.0), (1640.0, 118.0), 0xf8fafc, 10.0), 0x000000, 55.0);
+        let mut accent = rect(4, "Accent", (86.0, 930.0), (12.0, 118.0), color, 0.0);
+        let mut info =
+            text(5, "Information", s("Information text goes here", "Bilgilendirme metni buraya yazılır"), (124.0, baseline(930.0, 50.0)), 50.0, &dark, 0);
+        open_wide(&mut bar, 0.0);
+        slide_from(&mut tab, 0.0, 60.0, 0.35);
+        slide_from(&mut tab_t, 0.0, 60.0, 0.35);
+        for (e, d) in [(&mut bar, 0.0), (&mut accent, 0.3), (&mut tab, 0.35), (&mut tab_t, 0.35), (&mut info, 0.6)] {
+            appear(e, d, secs_);
+        }
+        v.push(broadcast(
+            &format!("duyuru-{cid}"),
+            format!("Announcement · {cname}"),
+            NEWS,
+            "An ANNOUNCEMENT tab over a bar with the information.",
+            secs_,
+            vec![bar, accent, tab, tab_t, info],
+            vec![
+                ctl("info", "Information", 5, "text"),
+                ctl("label", "Label", 2, "text"),
+                ctl("label_color", "Label Color", 1, "fill_color"),
+                ctl("bar", "Bar Color", 3, "fill_color"),
+                ctl("text_color", "Text Color", 5, "fill_color"),
+            ],
+        ));
+    }
+
+    // Info bar: LIVE on the left, the information in the middle, a web address on the right.
+    for (cid, cname, band_c) in [("koyu", "Dark", 0x111827), ("lacivert", "Navy", 0x1e3a8a)] {
+        let secs_ = 10.0;
+        let y = 1036.0;
+        let mut band = shadowed(rect(1, "Band", (960.0, y), (1920.0, 72.0), band_c, 0.0), 0x000000, 50.0);
+        let mut live = rect(2, "Label Box", (110.0, y), (180.0, 50.0), 0xdc2626, 6.0);
+        let mut live_t = text(3, "Label", s("● LIVE", "● CANLI"), (110.0, baseline(y, 32.0)), 32.0, &white, 1);
+        let mut info = text(4, "Information", s("Program name · Guest name", "Program adı · Konuk adı"), (230.0, baseline(y, 34.0)), 34.0, &white_semi, 0);
+        let mut site = text(5, "Web Address", "www.siteniz.com", (1880.0, baseline(y, 30.0)), 30.0, &news_style("Poppins", "Medium", 0xcbd5e1), 2);
+        open_wide(&mut band, 0.0);
+        pop_in(&mut live, 0.3);
+        for (e, d) in [(&mut band, 0.0), (&mut live, 0.3), (&mut live_t, 0.35), (&mut info, 0.5), (&mut site, 0.6)] {
+            appear(e, d, secs_);
+        }
+        v.push(broadcast(
+            &format!("bilgi-cubugu-{cid}"),
+            format!("Info Bar · {cname}"),
+            NEWS,
+            "A thin bar along the bottom: LIVE, the information and a web address.",
+            secs_,
+            vec![band, live, live_t, info, site],
+            vec![
+                ctl("info", "Information", 4, "text"),
+                ctl("label", "Label", 3, "text"),
+                ctl("site", "Web Address", 5, "text"),
+                ctl("label_color", "Label Color", 2, "fill_color"),
+                ctl("band", "Band Color", 1, "fill_color"),
+            ],
+        ));
+    }
+
+    // Screen frames: a thin line round the picture, corner brackets, a double line, a frame with an
+    // info bar.
+    for (cid, cname, color) in [("beyaz", "White", 0xffffff), ("altin", "Gold", 0xeab308), ("kirmizi", "Red", 0xdc2626)] {
+        let secs_ = 10.0;
+        let mut line = rect(1, "Frame", (960.0, 540.0), (1856.0, 1016.0), color, 18.0);
+        outline_only(&mut line, color, 5.0);
+        appear(&mut line, 0.0, secs_);
+        pop_in(&mut line, 0.0);
+        v.push(broadcast(
+            &format!("cerceve-ince-{cid}"),
+            format!("Screen Frame · Thin Line · {cname}"),
+            NEWS,
+            "A thin line round the edge of the picture.",
+            secs_,
+            vec![line],
+            vec![ctl("color", "Frame Color", 1, "stroke_color"), ctl("width", "Line Width", 1, "stroke_width")],
+        ));
+
+        let mut corners = brackets(1, (960.0, 540.0), 1840.0, 1000.0, 150.0, 12.0, color);
+        for (i, c) in corners.iter_mut().enumerate() {
+            appear(c, 0.1 * i as f64, secs_);
+            pop_in(c, 0.1 * i as f64);
+        }
+        v.push(broadcast(
+            &format!("cerceve-kose-{cid}"),
+            format!("Screen Frame · Corners · {cname}"),
+            NEWS,
+            "Corner brackets at the edges of the picture.",
+            secs_,
+            corners,
+            vec![ctl("color", "Frame Color", 1, "fill_color")],
+        ));
+
+        let mut outer = rect(1, "Frame", (960.0, 540.0), (1860.0, 1020.0), color, 0.0);
+        outline_only(&mut outer, color, 4.0);
+        let mut inner = rect(2, "Inner Frame", (960.0, 540.0), (1816.0, 976.0), color, 0.0);
+        outline_only(&mut inner, color, 1.5);
+        appear(&mut outer, 0.0, secs_);
+        appear(&mut inner, 0.3, secs_);
+        v.push(broadcast(
+            &format!("cerceve-cift-{cid}"),
+            format!("Screen Frame · Double Line · {cname}"),
+            NEWS,
+            "Two thin lines round the edge of the picture.",
+            secs_,
+            vec![outer, inner],
+            vec![ctl("color", "Frame Color", 1, "stroke_color"), ctl("color2", "Inner Frame Color", 2, "stroke_color")],
+        ));
+    }
+    {
+        let secs_ = 10.0;
+        let mut line = rect(1, "Frame", (960.0, 500.0), (1856.0, 936.0), 0xffffff, 14.0);
+        outline_only(&mut line, 0xffffff, 4.0);
+        let mut band = rect(2, "Band", (960.0, 1024.0), (1856.0, 72.0), 0xffffff, 14.0);
+        let mut info =
+            text(3, "Information", s("Information bar · your text here", "Bilgi çubuğu · metniniz buraya"), (960.0, baseline(1024.0, 36.0)), 36.0, &dark, 1);
+        appear(&mut line, 0.0, secs_);
+        open_wide(&mut band, 0.3);
+        appear(&mut band, 0.3, secs_);
+        appear(&mut info, 0.6, secs_);
+        v.push(broadcast(
+            "cerceve-bilgi",
+            "Screen Frame · With Info Bar".into(),
+            NEWS,
+            "A thin frame with an information bar under it.",
+            secs_,
+            vec![line, band, info],
+            vec![
+                ctl("info", "Information", 3, "text"),
+                ctl("color", "Frame Color", 1, "stroke_color"),
+                ctl("bar", "Bar Color", 2, "fill_color"),
+                ctl("text_color", "Text Color", 3, "fill_color"),
+            ],
+        ));
+    }
+
+    // Highlight shapes with a label: a ring, a box, an underline marker.
+    for (cid, cname, color) in [("kirmizi", "Red", 0xef4444), ("sari", "Yellow", 0xfacc15)] {
+        let secs_ = 5.0;
+        let label_style =
+            Style { boxed: Some((color, 100.0, 16.0, 10.0)), ..news_style("Poppins", "Bold", if color == 0xfacc15 { 0x111827 } else { 0xffffff }) };
+        let mut ring = ellipse(1, "Ring", (960.0, 520.0), (420.0, 420.0), color);
+        outline_only(&mut ring, color, 12.0);
+        let mut tag = text(2, "Label", s("LOOK!", "DİKKAT!"), (960.0, 800.0), 46.0, &label_style, 1);
+        appear(&mut ring, 0.0, secs_);
+        pop_in(&mut ring, 0.0);
+        appear(&mut tag, 0.35, secs_);
+        slide_from(&mut tag, 0.0, 40.0, 0.35);
+        let mut t = broadcast(
+            &format!("vurgu-halka-{cid}"),
+            format!("Highlight Shape · Ring · {cname}"),
+            HIGHLIGHT,
+            "A ring round something to point it out, with a label.",
+            secs_,
+            vec![ring, tag],
+            vec![ctl("label", "Label", 2, "text"), ctl("color", "Color", 1, "stroke_color"), ctl("label_color", "Label Color", 2, "background_color")],
+        );
+        pulse_after(&mut t.layers[..1], 0.5, secs_);
+        v.push(t);
+
+        let mut boxr = rect(1, "Box", (960.0, 520.0), (620.0, 380.0), color, 16.0);
+        outline_only(&mut boxr, color, 10.0);
+        let mut tag = text(2, "Label", s("HERE", "BURADA"), (650.0, 306.0), 40.0, &label_style, 0);
+        appear(&mut boxr, 0.0, secs_);
+        pop_in(&mut boxr, 0.0);
+        appear(&mut tag, 0.35, secs_);
+        slide_from(&mut tag, -40.0, 0.0, 0.35);
+        v.push(broadcast(
+            &format!("vurgu-kutu-{cid}"),
+            format!("Highlight Shape · Box · {cname}"),
+            HIGHLIGHT,
+            "A box round something to point it out, with a label.",
+            secs_,
+            vec![boxr, tag],
+            vec![ctl("label", "Label", 2, "text"), ctl("color", "Color", 1, "stroke_color"), ctl("label_color", "Label Color", 2, "background_color")],
+        ));
+
+        let mut marker = slant(1, "Marker", (960.0, 560.0), (700.0, 40.0), 18.0, color);
+        set(&mut marker, "opacity", ParamValue::Float(80.0));
+        open_wide(&mut marker, 0.0);
+        appear(&mut marker, 0.0, secs_);
+        v.push(broadcast(
+            &format!("vurgu-alt-cizgi-{cid}"),
+            format!("Highlight Shape · Underline Marker · {cname}"),
+            HIGHLIGHT,
+            "A marker stroke under a word or a line of text.",
+            secs_,
+            vec![marker],
+            vec![ctl("color", "Color", 1, "fill_color")],
+        ));
+    }
+}
+
+/// A gentle beat from `from` until the outro.
+fn pulse_after(layers: &mut [EffectInstance], from: f64, duration: f64) {
+    let end = (duration - OUTRO).max(from);
+    for e in layers.iter_mut() {
+        let mut frames = e.params.get("scale").map(|p| p.keyframes.iter().map(|k| (k.time, k.value.clone(), k.interp)).collect::<Vec<_>>()).unwrap_or_default();
+        let mut t = from.max(0.6);
+        while t + 0.6 <= end {
+            frames.push((secs(t), ParamValue::Float(100.0), Interpolation::EaseOut));
+            frames.push((secs(t + 0.3), ParamValue::Float(108.0), Interpolation::EaseOut));
+            frames.push((secs(t + 0.6), ParamValue::Float(100.0), Interpolation::Linear));
+            t += 0.9;
+        }
+        let keyframes = frames
+            .into_iter()
+            .map(|(t, v, i)| {
+                let mut k = Keyframe::new(t, v);
+                k.interp = i;
+                k
+            })
+            .collect();
+        e.params.insert("scale".into(), Param { value: ParamValue::Float(100.0), keyframes });
+    }
+}
+
+fn stylish(v: &mut Vec<GraphicsTemplate>) {
+    let dark_text = news_style("Poppins", "Bold", 0x1c1203);
+    let white = news_style("Poppins", "Bold", 0xffffff);
+    let anton = news_style("Anton", "Regular", 0xffffff);
+
+    // Gold ribbon: a slanted gold band with tails, the title on it.
+    {
+        let secs_ = 6.0;
+        let c = (960.0, 900.0);
+        let mut tail_l = gradient_fill(slant(1, "Tail", (c.0 - 520.0, c.1 + 14.0), (120.0, 96.0), -30.0, 0x92400e), 0x78350f, 0xb45309, 90.0);
+        let mut tail_r = gradient_fill(slant(2, "Tail", (c.0 + 520.0, c.1 + 14.0), (120.0, 96.0), 30.0, 0x92400e), 0x78350f, 0xb45309, 90.0);
+        let mut band = shadowed(gradient_fill(slant(3, "Ribbon", c, (1040.0, 110.0), 40.0, 0xeab308), 0xfde68a, 0xb45309, 90.0), 0x000000, 55.0);
+        let mut title = text(
+            4,
+            "Title",
+            s("YOUR TITLE HERE", "BAŞLIĞINIZ BURADA"),
+            (c.0, baseline(c.1, 58.0)),
+            58.0,
+            &news_style("Cinzel Decorative", "Bold", 0x1c1203),
+            1,
+        );
+        for e in [&mut tail_l, &mut tail_r] {
+            appear(e, 0.35, secs_);
+        }
+        slide_from(&mut tail_l, 80.0, 0.0, 0.35);
+        slide_from(&mut tail_r, -80.0, 0.0, 0.35);
+        open_wide(&mut band, 0.0);
+        appear(&mut band, 0.0, secs_);
+        appear(&mut title, 0.45, secs_);
+        v.push(broadcast(
+            "altin-kurdele",
+            "Gold Ribbon".into(),
+            STYLISH,
+            "A slanted gold ribbon with the title on it.",
+            secs_,
+            vec![tail_l, tail_r, band, title],
+            vec![ctl("title", "Title", 4, "text"), ctl("text_color", "Text Color", 4, "fill_color"), ctl("font", "Font", 4, "font")],
+        ));
+    }
+
+    // Slanted lower thirds: a coloured band with the name over a dark one with the role.
+    for (cid, cname, a, b) in [
+        ("altin", "Gold", 0xeab308, 0xfde68a),
+        ("mor", "Purple", 0x7c3aed, 0xa78bfa),
+        ("kirmizi", "Red", 0xdc2626, 0xf87171),
+        ("turkuaz", "Teal", 0x0d9488, 0x5eead4),
+    ] {
+        let secs_ = 6.0;
+        let mut top = shadowed(gradient_fill(slant(1, "Band", (430.0, 880.0), (680.0, 92.0), 36.0, a), b, a, 0.0), 0x000000, 50.0);
+        let mut bottom = slant(2, "Second Band", (400.0, 962.0), (560.0, 64.0), 26.0, 0x111827);
+        let name_style = if a == 0xeab308 { dark_text } else { white };
+        let mut name = text(3, "Name", s("Full Name", "Ad Soyad"), (130.0, baseline(880.0, 54.0)), 54.0, &name_style, 0);
+        let mut role = text(4, "Role", s("Job Title", "Unvan / Görev"), (150.0, baseline(962.0, 34.0)), 34.0, &news_style("Poppins", "Medium", 0xe5e7eb), 0);
+        slide_from(&mut top, -760.0, 0.0, 0.0);
+        slide_from(&mut bottom, -760.0, 0.0, 0.15);
+        for (e, d) in [(&mut top, 0.0), (&mut bottom, 0.15), (&mut name, 0.45), (&mut role, 0.6)] {
+            appear(e, d, secs_);
+        }
+        v.push(broadcast(
+            &format!("egimli-altbant-{cid}"),
+            format!("Slanted Lower Third · {cname}"),
+            STYLISH,
+            "A name on a slanted coloured band, the role on a dark one under it.",
+            secs_,
+            vec![top, bottom, name, role],
+            vec![
+                ctl("name", "Name", 3, "text"),
+                ctl("role", "Role", 4, "text"),
+                ctl("band", "Band Color", 1, "gradient_end"),
+                ctl("band2", "Second Band Color", 2, "fill_color"),
+                ctl("text_color", "Text Color", 3, "fill_color"),
+            ],
+        ));
+    }
+
+    // Sliding bands: three slanted bands come in one after another, the title on the last.
+    for (cid, cname, cols) in [
+        ("mor", "Purple", [0x4c1d95, 0x7c3aed, 0xa855f7]),
+        ("mavi", "Blue", [0x1e3a8a, 0x2563eb, 0x38bdf8]),
+        ("turuncu", "Orange", [0x9a3412, 0xea580c, 0xfb923c]),
+    ] {
+        let secs_ = 6.0;
+        let mut layers: Vec<EffectInstance> = cols
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let mut e = slant(
+                    i as u64 + 1,
+                    "Band",
+                    (560.0 - i as f64 * 30.0, 880.0 - i as f64 * 8.0),
+                    (900.0 - i as f64 * 80.0, 120.0 - i as f64 * 16.0),
+                    60.0,
+                    *c,
+                );
+                slide_from(&mut e, -1100.0, 0.0, 0.12 * i as f64);
+                appear(&mut e, 0.12 * i as f64, secs_);
+                e
+            })
+            .collect();
+        let mut title = text(4, "Title", s("YOUR TITLE", "BAŞLIĞINIZ"), (200.0, baseline(872.0, 62.0)), 62.0, &anton, 0);
+        appear(&mut title, 0.55, secs_);
+        slide_from(&mut title, -60.0, 0.0, 0.55);
+        layers.push(title);
+        v.push(broadcast(
+            &format!("kayan-bantlar-{cid}"),
+            format!("Sliding Bands · {cname}"),
+            STYLISH,
+            "Three slanted bands slide in one after another, the title on them.",
+            secs_,
+            layers,
+            vec![ctl("title", "Title", 4, "text"), ctl("band", "Band Color", 3, "fill_color"), ctl("text_color", "Text Color", 4, "fill_color")],
+        ));
+    }
+
+    // Bracketed title: corner brackets close in round a centred title.
+    for (cid, cname, color) in [("beyaz", "White", 0xffffff), ("altin", "Gold", 0xeab308), ("turkuaz", "Teal", 0x2dd4bf)] {
+        let secs_ = 6.0;
+        let mut layers = brackets(1, (960.0, 530.0), 1000.0, 260.0, 70.0, 8.0, color);
+        let offsets = [(-60.0, -40.0), (60.0, -40.0), (-60.0, 40.0), (60.0, 40.0)];
+        for (e, (dx, dy)) in layers.iter_mut().zip(offsets) {
+            slide_from(e, dx, dy, 0.0);
+            appear(e, 0.0, secs_);
+        }
+        let mut title =
+            text(5, "Title", s("YOUR TITLE", "BAŞLIĞINIZ"), (960.0, baseline(510.0, 110.0)), 110.0, &news_style("Bebas Neue", "Regular", 0xffffff), 1);
+        set(&mut title, "tracking", ParamValue::Float(80.0));
+        let mut sub = text(
+            6,
+            "Subtitle",
+            s("subtitle", "alt başlık"),
+            (960.0, baseline(610.0, 38.0)),
+            38.0,
+            &Style { shadow: Some((0x000000, 80.0, 3.0, 12.0)), ..news_style("Poppins", "SemiBold", color) },
+            1,
+        );
+        appear(&mut title, 0.35, secs_);
+        pop_in(&mut title, 0.35);
+        appear(&mut sub, 0.7, secs_);
+        layers.extend([title, sub]);
+        v.push(broadcast(
+            &format!("koseli-baslik-{cid}"),
+            format!("Bracketed Title · {cname}"),
+            STYLISH,
+            "A centred title framed by corner brackets.",
+            secs_,
+            layers,
+            vec![
+                ctl("title", "Title", 5, "text"),
+                ctl("subtitle", "Subtitle", 6, "text"),
+                ctl("color", "Frame Color", 1, "fill_color"),
+                ctl("text_color", "Text Color", 5, "fill_color"),
+            ],
+        ));
+    }
+
+    // Glitch title: cyan and magenta copies jump around the white title, then settle.
+    {
+        let secs_ = 5.0;
+        let st = news_style("Archivo Black", "Regular", 0xffffff);
+        let base = (960.0, baseline(540.0, 130.0));
+        let msg = s("GLITCH", "GLITCH");
+        let mut layers = Vec::new();
+        for (uid, name, color, dx) in [(1u64, "Cyan Copy", 0x22d3ee, -8.0), (2, "Magenta Copy", 0xf0abfc, 8.0)] {
+            let mut e = text(uid, name, msg, (base.0 + dx, base.1), 130.0, &news_style("Archivo Black", "Regular", color), 1);
+            let p = |x: f64, y: f64| ParamValue::Vec2(Vec2::new(base.0 + dx + x, base.1 + y));
+            let j = dx.signum();
+            keys(
+                &mut e,
+                "position",
+                p(0.0, 0.0),
+                &[
+                    (0.0, p(60.0 * j, 0.0), Interpolation::Hold),
+                    (0.08, p(-30.0 * j, 6.0), Interpolation::Hold),
+                    (0.16, p(18.0 * j, -4.0), Interpolation::Hold),
+                    (0.24, p(0.0, 0.0), Interpolation::Hold),
+                    (1.6, p(24.0 * j, 0.0), Interpolation::Hold),
+                    (1.68, p(0.0, 0.0), Interpolation::Hold),
+                    (2.8, p(-20.0 * j, 3.0), Interpolation::Hold),
+                    (2.88, p(0.0, 0.0), Interpolation::Hold),
+                ],
+            );
+            appear(&mut e, 0.0, secs_);
+            layers.push(e);
+        }
+        let mut main = text(3, "Title", msg, base, 130.0, &st, 1);
+        appear(&mut main, 0.05, secs_);
+        layers.push(main);
+        for (uid, y, w, at) in [(4u64, 470.0, 760.0, 0.08), (5, 600.0, 520.0, 1.62), (6, 520.0, 640.0, 2.82)] {
+            let mut bar = rect(uid, "Glitch Bar", (960.0, y), (w, 14.0), 0xffffff, 0.0);
+            let f = |v: f64| ParamValue::Float(v);
+            keys(
+                &mut bar,
+                "opacity",
+                f(0.0),
+                &[(0.0, f(0.0), Interpolation::Hold), (at, f(85.0), Interpolation::Hold), (at + 0.08, f(0.0), Interpolation::Hold)],
+            );
+            layers.push(bar);
+        }
+        v.push(broadcast(
+            "glitch-baslik",
+            "Glitch Title".into(),
+            STYLISH,
+            "A title that jumps and splits into colours, then settles.",
+            secs_,
+            layers,
+            vec![ctl("title", "Title", 3, "text"), ctl("copy1", "Text", 1, "text"), ctl("copy2", "Text", 2, "text")],
+        ));
+    }
+
+    // Light sweep: a gradient title with a band of light passing across it.
+    for (cid, cname, a, b) in [("gunbatimi", "Sunset", 0xf97316, 0xec4899), ("okyanus", "Ocean", 0x22d3ee, 0x6366f1), ("altin", "Gold", 0xfde68a, 0xb45309)] {
+        let secs_ = 5.0;
+        let st = Style { gradient: Some((a, b)), shadow: Some((0x000000, 55.0, 4.0, 18.0)), ..news_style("Poppins", "Black", a) };
+        let mut title = text(1, "Title", s("YOUR TITLE", "BAŞLIĞINIZ"), (960.0, baseline(540.0, 140.0)), 140.0, &st, 1);
+        appear(&mut title, 0.0, secs_);
+        slide_from(&mut title, 0.0, 50.0, 0.0);
+        let mut light = slant(2, "Light", (960.0, 540.0), (70.0, 220.0), 90.0, 0xffffff);
+        let f = |v: f64| ParamValue::Float(v);
+        keys(
+            &mut light,
+            "opacity",
+            f(0.0),
+            &[
+                (0.0, f(0.0), Interpolation::Linear),
+                (0.6, f(0.0), Interpolation::Linear),
+                (0.75, f(30.0), Interpolation::Linear),
+                (1.35, f(30.0), Interpolation::Linear),
+                (1.5, f(0.0), Interpolation::Linear),
+            ],
+        );
+        let p = |x: f64| ParamValue::Vec2(Vec2::new(x, 540.0));
+        keys(&mut light, "position", p(1500.0), &[(0.6, p(420.0), Interpolation::Linear), (1.5, p(1500.0), Interpolation::Linear)]);
+        v.push(broadcast(
+            &format!("isik-izi-{cid}"),
+            format!("Light Sweep · {cname}"),
+            STYLISH,
+            "A gradient title with a band of light passing across it.",
+            secs_,
+            vec![title, light],
+            vec![
+                ctl("title", "Title", 1, "text"),
+                ctl("g1", "Gradient Start", 1, "gradient_start"),
+                ctl("g2", "Gradient End", 1, "gradient_end"),
+                ctl("font", "Font", 1, "font"),
+            ],
+        ));
+    }
 }
 
 /// s("SUBSCRIBE", "ABONE OL") -> "Abone Ol", with Turkish dotted and dotless I.
