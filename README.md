@@ -9,6 +9,10 @@
 </p>
 
 <p align="center">
+  <a href="https://www.freewaretr.com/app/easyvideoedit"><img alt="Download / İndir" src="https://img.shields.io/badge/Download%20%2F%20%C4%B0ndir-Windows-22c55e?style=for-the-badge"></a>
+</p>
+
+<p align="center">
   <img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/badge/license-MIT%20%7C%20Apache--2.0-8b5cf6?style=flat-square">
   <img alt="Written in pure Rust" src="https://img.shields.io/badge/pure-Rust-6a3fd6?style=flat-square&logo=rust&logoColor=white">
   <img alt="Languages: English, Turkish and more" src="https://img.shields.io/badge/languages-English%20%7C%20T%C3%BCrk%C3%A7e%20%7C%20%E2%80%A6-8b5cf6?style=flat-square">
