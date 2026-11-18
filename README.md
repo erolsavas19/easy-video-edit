@@ -23,6 +23,10 @@ It is a fork of [FilmCraft](https://github.com/storytold/filmcraft), the open-so
 editor written from scratch in Rust: FilmCraft's engine does the decoding, compositing, effects and
 export, and FilmCraft's full layout is still one click away (the layout icon in the top bar).
 
+<p align="center">
+  <img src="docs/images/easyvideoedit-main.png" width="960" alt="Easy Video Edit main window: Text templates on the left, the preview with a news-style info bar, Properties on the right and a layered timeline below">
+</p>
+
 ## What's inside
 
 | Category | What you get |
