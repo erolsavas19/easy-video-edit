@@ -72,9 +72,15 @@ licences only (OFL-1.1, Apache-2.0) and listed in that repository's `ATTRIBUTION
 
 ## Türkçe
 
-Easy Video Edit, CapCut ve Movavi kadar kolay ama altında profesyonel bir motor olan, açık kaynaklı
-bir video düzenleyicidir. Arayüz Türkçe kullanılabilir; şablonların örnek yazıları da arayüz diline
-göre Türkçe gelir. Reklam, filigran ya da abonelik yoktur.
+Easy Video Edit, videolarını kolayca düzenlemek isteyenler için hazırlanmış, açık kaynaklı ve
+ücretsiz bir video düzenleyicidir. Son yıllarda çok sevilen, şablon ağırlıklı ve "seç, sürükle,
+dışa aktar" mantığıyla çalışan kolay düzenleyicilerin rahatlığını sunar; ama ücretsizdir, açık
+kaynaklıdır ve altında profesyonel bir video motoru (FilmCraft) çalışır. Profesyonel kurgu
+programlarının yerini alma iddiası yoktur; gündelik video işlerinin büyük çoğunluğunu en kolay
+yoldan halletmeyi amaçlar.
+
+Arayüz Türkçe kullanılabilir; şablonların örnek yazıları da arayüz diline göre Türkçe gelir.
+Reklam, filigran ya da abonelik yoktur; videolarınız hiçbir yere yüklenmez.
 
 ## License and credits
 

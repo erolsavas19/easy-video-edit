@@ -304,7 +304,7 @@ fn cut_all(_: &CutJob, _: &Arc<filmcraft_export::Progress>, _: &Arc<Mutex<Vec<(T
 }
 
 // ------------------------------------------------------------------------------------------------
-// Body effects: built on a clip's Cutout mask (`masks.cutout`), CapCut-style looks for a cut-out
+// Body effects: built on a clip's Cutout mask (`masks.cutout`), the looks of popular easy editors for a cut-out
 // person or object. A copy of the clip goes on a new layer just under it: a coloured, widened and
 // softened copy of the cut-out (Glow, Neon Edge), or the whole picture with the background changed
 // (Portrait blurs it, Color Pop turns it grey, Spotlight darkens it) while the cut-out on top keeps
