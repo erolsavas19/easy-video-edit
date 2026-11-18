@@ -1908,6 +1908,15 @@ fn tracking(v: &mut Vec<GraphicsTemplate>) {
         text_controls(&[(1, "Text")], 1, Some(1)),
     );
     add("ok", "Follow · Arrow", glyph(1, "Arrow", "\u{2b07}", (960.0, 540.0), 150.0, 0xef4444, 0xffffff), vec![ctl("color", "Color", 1, "fill_color")]);
+    // small stickers that circle a head (Body Effects ▸ orbit)
+    for (id, name, ch, color, outline) in [
+        ("yildiz", "Follow · Star", "\u{2605}", 0xfacc15, 0x78350f),
+        ("kalp", "Follow · Heart", "\u{2665}", 0xf43f5e, 0xffffff),
+        ("nota", "Follow · Note", "\u{266a}", 0xffffff, 0x1e1b4b),
+        ("parilti", "Follow · Sparkle", "\u{2726}", 0xfef9c3, 0xca8a04),
+    ] {
+        add(id, name, glyph(1, "Sticker", ch, (960.0, 540.0), 64.0, color, outline), vec![ctl("color", "Color", 1, "fill_color")]);
+    }
 }
 
 const TRACKING: &str = "Follow Object";

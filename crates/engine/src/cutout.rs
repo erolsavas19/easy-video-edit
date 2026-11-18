@@ -32,6 +32,17 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
             named: crate::commands::NamedKeys::NONE,
         },
         CommandSpec {
+            id: "masks.bodyEffect",
+            label: "Body Effect",
+            menu: &[],
+            shortcut: None,
+            params: r##"{"clip":id?,"effect":"glow|neon|portrait|colorPop|spotlight","color":"#rrggbb"?}"##,
+            enabled: has_seq,
+            run: body_effect,
+            journal: true,
+            named: crate::commands::NamedKeys::NONE,
+        },
+        CommandSpec {
             id: "segment.model",
             label: "Segmentation Model",
             menu: &[],
@@ -290,4 +301,131 @@ fn cut_all(j: &CutJob, prog: &Arc<filmcraft_export::Progress>, out: &Arc<Mutex<V
 #[cfg(not(feature = "segment"))]
 fn cut_all(_: &CutJob, _: &Arc<filmcraft_export::Progress>, _: &Arc<Mutex<Vec<(Tick, MaskPath)>>>) -> std::result::Result<(), String> {
     Err(filmcraft_segment::SegmentError::Unavailable.to_string())
+}
+
+// ------------------------------------------------------------------------------------------------
+// Body effects: built on a clip's Cutout mask (`masks.cutout`), CapCut-style looks for a cut-out
+// person or object. A copy of the clip goes on a new layer just under it: a coloured, widened and
+// softened copy of the cut-out (Glow, Neon Edge), or the whole picture with the background changed
+// (Portrait blurs it, Color Pop turns it grey, Spotlight darkens it) while the cut-out on top keeps
+// its own colours. One undo step; the copy is an ordinary clip the user can change or delete.
+// ------------------------------------------------------------------------------------------------
+
+/// The body effects `masks.bodyEffect` makes.
+pub const BODY_EFFECTS: &[&str] = &["glow", "neon", "portrait", "colorPop", "spotlight"];
+
+/// Name of the mask `masks.cutout` adds to Opacity.
+const CUTOUT_NAME: &str = "Cutout";
+
+/// The clip's Cutout mask: (Opacity index, mask index).
+fn cutout_mask(it: &filmcraft_project::TrackItem) -> Option<(usize, usize)> {
+    let oi = it.effects.iter().position(|e| e.effect == "opacity")?;
+    let mi = it.effects.get(oi)?.masks.iter().rposition(|m| m.name == CUTOUT_NAME)?;
+    Some((oi, mi))
+}
+
+/// `#rrggbb` as sRGB 0..1 with full alpha.
+fn hex_color(s: &str) -> Option<[f32; 4]> {
+    let h = s.strip_prefix('#').unwrap_or(s);
+    if h.len() != 6 || !h.is_ascii() {
+        return None;
+    }
+    let c = |i: usize| u8::from_str_radix(h.get(i..i + 2)?, 16).ok().map(|v| f32::from(v) / 255.0);
+    Some([c(0)?, c(2)?, c(4)?, 1.0])
+}
+
+/// An effect instance with some parameters set.
+fn effect_with(id: &str, params: &[(&str, filmcraft_project::ParamValue)]) -> Option<filmcraft_project::EffectInstance> {
+    let mut e = filmcraft_project::find_effect(id)?.instance();
+    for (k, v) in params {
+        if let Some(p) = e.params.get_mut(*k) {
+            p.value = v.clone();
+        }
+    }
+    Some(e)
+}
+
+/// A slow beat on an opacity parameter over the clip's media span (`from`, `len`).
+fn beat(p: &mut filmcraft_project::Param, from: Tick, len: Tick, low: f64) {
+    use filmcraft_project::{Keyframe, ParamValue};
+    let period = filmcraft_time::TICKS_PER_SECOND;
+    p.keyframes.clear();
+    let mut t = 0i64;
+    let mut high = true;
+    while t <= len.0 && p.keyframes.len() < 4000 {
+        let mut k = Keyframe::new(Tick(from.0.saturating_add(t)), ParamValue::Float(if high { 100.0 } else { low }));
+        k.interp = filmcraft_project::Interpolation::EaseOut;
+        p.keyframes.push(k);
+        high = !high;
+        t = t.saturating_add(period / 2);
+    }
+}
+
+fn body_effect(s: &mut Session, p: &Value) -> Result<Value> {
+    use filmcraft_project::ParamValue as V;
+    let cmd = "masks.bodyEffect";
+    let kind = crate::commands::str_p(p, "effect").ok_or_else(|| bad(cmd, format!("need `effect`: one of {}", BODY_EFFECTS.join(", "))))?.to_string();
+    if !BODY_EFFECTS.contains(&kind.as_str()) {
+        return Err(bad(cmd, format!("unknown body effect `{kind}`: one of {}", BODY_EFFECTS.join(", "))));
+    }
+    let color = match crate::commands::str_p(p, "color") {
+        Some(c) => hex_color(c).ok_or_else(|| bad(cmd, "`color` is #rrggbb"))?,
+        None if kind == "neon" => [0.13, 0.83, 0.93, 1.0],
+        None => [1.0, 0.85, 0.35, 1.0],
+    };
+    let clip = crate::commands::clip_p(p, "clip").or_else(|| s.state.selection.first().copied()).ok_or_else(|| bad(cmd, "need `clip`"))?;
+    let seq = s.active_sequence().ok_or(EngineError::NoSequence)?;
+    let (track, it) = seq.find_item(clip).ok_or_else(|| bad(cmd, "no such clip"))?;
+    if !seq.video_tracks.iter().any(|t| t.id == track) {
+        return Err(bad(cmd, "body effects go on a video clip"));
+    }
+    if cutout_mask(it).is_none() {
+        return Err(bad(cmd, "the clip has no cut-out: cut the object out first (Replace Background)"));
+    }
+    let id = s.edit_sequence("Body Effect", move |q, ctx, _| {
+        let ti = q.video_tracks.iter().position(|t| t.id == track).ok_or_else(|| bad(cmd, "the clip's track is gone"))?;
+        let it = q.video_tracks.get(ti).and_then(|t| t.items.iter().find(|i| i.id == clip)).cloned().ok_or(filmcraft_edit::EditError::NoItem(clip))?;
+        let (oi, mi) = cutout_mask(&it).ok_or_else(|| bad(cmd, "the clip has no cut-out"))?;
+        let mut copy = it.clone();
+        copy.id = filmcraft_project::ClipId(ctx.alloc());
+        copy.link = None;
+        copy.group = None;
+        copy.name = format!("{} · {}", it.name, kind);
+        let span = Tick((it.duration.0 as f64 * it.speed.abs()).round() as i64);
+        let opacity = copy.effects.get_mut(oi).ok_or_else(|| bad(cmd, "no Opacity"))?;
+        match kind.as_str() {
+            "glow" | "neon" => {
+                // only the cut-out, widened and softened, in one colour, beating slowly
+                let keep = opacity.masks.get(mi).cloned().ok_or_else(|| bad(cmd, "no cut-out"))?;
+                let mut m = keep;
+                let (grow, soft) = if kind == "glow" { (24.0, 45.0) } else { (9.0, 4.0) };
+                m.expansion.value = V::Float(grow);
+                m.feather.value = V::Float(soft);
+                opacity.masks = vec![m];
+                if let Some(op) = opacity.params.get_mut("opacity") {
+                    beat(op, it.source_in, span, if kind == "glow" { 45.0 } else { 70.0 });
+                }
+                let tint = effect_with("tint", &[("black", V::Color(color)), ("white", V::Color(color)), ("amount", V::Float(100.0))])
+                    .ok_or_else(|| bad(cmd, "no Tint"))?;
+                copy.effects.push(tint);
+            }
+            _ => {
+                // the whole picture with the background changed; the cut-out on top keeps its colours
+                opacity.masks.clear();
+                let fx = match kind.as_str() {
+                    "portrait" => effect_with("gaussian_blur", &[("blurriness", V::Float(40.0)), ("repeat_edge", V::Bool(true))]),
+                    "colorPop" => effect_with("black_white", &[]),
+                    _ => effect_with("brightness_contrast", &[("brightness", V::Float(-55.0)), ("contrast", V::Float(-10.0))]),
+                }
+                .ok_or_else(|| bad(cmd, "missing effect"))?;
+                copy.effects.push(fx);
+            }
+        }
+        let mut t = filmcraft_project::Track::new(filmcraft_project::TrackId(ctx.alloc()), filmcraft_project::TrackKind::Video, "Video 0".into());
+        t.items.push(copy.clone());
+        q.video_tracks.insert(ti, t);
+        crate::sequence_tools::renumber(&mut q.video_tracks, "Video");
+        Ok(copy.id)
+    })?;
+    Ok(json!({"clip": id.0}))
 }

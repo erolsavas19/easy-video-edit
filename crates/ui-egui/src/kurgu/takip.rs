@@ -91,6 +91,8 @@ pub struct TrackPanel {
     pub background: Option<u64>,
     /// `segment.model`: (available in this build, installed), read once.
     pub model: Option<(bool, bool)>,
+    /// The colour chosen for Glow and Neon Edge (index into `BODY_COLORS`).
+    pub body_color: u8,
 }
 
 /// Frames between the model's results for each quality.
@@ -406,6 +408,7 @@ fn background_steps(
     if app.ui.kurgu.track.background.is_some() {
         ui.label(egui::RichText::new(tl!("✔ The background is on the layer under the video")).size(12.0).color(t.accent));
     }
+    body_steps(app, ui, t, cut_progress.is_some());
 }
 
 /// Starts the cut-out of the box (downloading the model first when asked).
@@ -615,6 +618,137 @@ fn attach(app: &mut FilmcraftApp, action: Action) {
     })();
     match r {
         Ok(title) => app.ui.kurgu.track.follower = Some(title),
+        Err(e) => app.ui.status = e,
+    }
+}
+
+/// A body effect card: what it is and what it does.
+struct Body {
+    key: &'static str,
+    label: &'static str,
+    icon: Icon,
+    /// `masks.bodyEffect` effect, or an orbiting sticker template.
+    effect: Option<&'static str>,
+    sticker: Option<&'static str>,
+    tip: &'static str,
+}
+
+const BODIES: [Body; 8] = [
+    Body { key: "glow", label: "Glow", icon: Icon::Sun, effect: Some("glow"), sticker: None, tip: "A soft coloured light round the person, beating slowly" },
+    Body { key: "neon", label: "Neon Edge", icon: Icon::Sparkle, effect: Some("neon"), sticker: None, tip: "A bright coloured edge round the person" },
+    Body { key: "portrait", label: "Portrait", icon: Icon::Camera, effect: Some("portrait"), sticker: None, tip: "The background blurred, the person sharp" },
+    Body {
+        key: "colorPop",
+        label: "Color Pop",
+        icon: Icon::Eyedropper,
+        effect: Some("colorPop"),
+        sticker: None,
+        tip: "The background in black and white, the person in colour",
+    },
+    Body { key: "spotlight", label: "Spotlight", icon: Icon::Moon, effect: Some("spotlight"), sticker: None, tip: "The background darkened, the person lit" },
+    Body { key: "stars", label: "Orbiting Stars", icon: Icon::Star, effect: None, sticker: Some("easyvideoedit:takip-yildiz"), tip: "Stars circling the head" },
+    Body {
+        key: "hearts",
+        label: "Orbiting Hearts",
+        icon: Icon::Star,
+        effect: None,
+        sticker: Some("easyvideoedit:takip-kalp"),
+        tip: "Hearts circling the head",
+    },
+    Body { key: "notes", label: "Music Notes", icon: Icon::Audio, effect: None, sticker: Some("easyvideoedit:takip-nota"), tip: "Notes circling the head" },
+];
+
+/// Colours offered for Glow and Neon Edge.
+const BODY_COLORS: [(&str, Color32); 5] = [
+    ("#ffd75a", Color32::from_rgb(0xff, 0xd7, 0x5a)),
+    ("#22d3ee", Color32::from_rgb(0x22, 0xd3, 0xee)),
+    ("#f472b6", Color32::from_rgb(0xf4, 0x72, 0xb6)),
+    ("#a3e635", Color32::from_rgb(0xa3, 0xe6, 0x35)),
+    ("#ffffff", Color32::WHITE),
+];
+
+/// The selected video clip's Cutout mask: (clip, Opacity index, mask index).
+fn cut_out_clip(app: &FilmcraftApp) -> Option<(u64, usize, usize)> {
+    let seq = app.session.active_sequence()?;
+    let c = app.ui.kurgu.track.target.map(|t| filmcraft_project::ClipId(t.0)).or_else(|| app.session.state.selection.first().copied())?;
+    let (_, it) = seq.find_item(c)?;
+    let oi = it.effects.iter().position(|e| e.effect == "opacity")?;
+    let mi = it.effects.get(oi)?.masks.iter().rposition(|m| m.name == "Cutout")?;
+    // only once the cut-out has its shapes (not while the model is still at work)
+    (it.effects.get(oi)?.masks.get(mi)?.path.keyframes.len() > 1).then_some((c.0, oi, mi))
+}
+
+/// Step 7: body effects on the cut-out.
+fn body_steps(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, busy: bool) {
+    step(ui, t, "7", tl!("Body effects"));
+    let Some((clip, oi, mi)) = cut_out_clip(app) else {
+        hint(ui, t, tl!("Cut the person or object out first; then light, edges and stickers can go round it."));
+        return;
+    };
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(tl!("Color")).size(11.5).color(t.text_dim));
+        for (i, (_, c)) in BODY_COLORS.iter().enumerate() {
+            let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+            ui.painter().circle_filled(r.center(), 8.0, *c);
+            if usize::from(app.ui.kurgu.track.body_color) == i {
+                ui.painter().circle_stroke(r.center(), 10.0, Stroke::new(2.0, t.accent));
+            }
+            if resp.clicked() {
+                app.ui.kurgu.track.body_color = u8::try_from(i).unwrap_or(0);
+            }
+        }
+    });
+    let w = (ui.available_width() - 8.0) / 2.0;
+    for row in BODIES.chunks(2) {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            for b in row {
+                let (r, resp) = ui.allocate_exact_size(vec2(w, 46.0), if busy { Sense::hover() } else { Sense::click() });
+                let resp = resp.on_hover_text(crate::i18n::t(b.tip));
+                let fill = if resp.hovered() && !busy { t.hover } else { t.field_bg };
+                ui.painter().rect_filled(r, CornerRadius::same(8), fill);
+                let color = if busy { t.text_dim } else { t.text };
+                icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 20.0, r.center().y), vec2(16.0, 16.0)), b.icon, color);
+                ui.painter().text(pos2(r.min.x + 36.0, r.center().y), Align2::LEFT_CENTER, crate::i18n::t(b.label), Tokens::ui(11.5), color);
+                app.auto.add(&format!("kurgu.body.{}", b.key), r, b.label);
+                if resp.clicked() {
+                    apply_body(app, b, clip, oi, mi);
+                }
+            }
+        });
+    }
+    hint(ui, t, tl!("Each effect goes on its own layer; select it in the timeline to change or delete it."));
+}
+
+fn apply_body(app: &mut FilmcraftApp, b: &Body, clip: u64, oi: usize, mi: usize) {
+    let color = BODY_COLORS.get(usize::from(app.ui.kurgu.track.body_color)).map_or("#ffd75a", |c| c.0);
+    let r = if let Some(effect) = b.effect {
+        app.session.execute("masks.bodyEffect", json!({"clip": clip, "effect": effect, "color": color})).map(|_| ()).map_err(|e| e.to_string())
+    } else if let Some(sticker) = b.sticker {
+        (|| -> Result<(), String> {
+            let start = app.session.active_sequence().and_then(|q| q.find_item(filmcraft_project::ClipId(clip))).map(|(_, it)| it.start).ok_or("no clip")?;
+            // three of them, a third of a turn apart
+            for phase in [0.0, 120.0, 240.0] {
+                let placed = app.session.execute("graphics.template.apply", json!({"template": sticker, "time": start.0})).map_err(|e| e.to_string())?;
+                let id = placed["clip"].as_u64().ok_or("no sticker placed")?;
+                app.session
+                    .execute(
+                        "masks.follow",
+                        json!({"clip": clip, "effect": oi, "mask": mi, "target": id, "place": "top", "orbit": {"radius": 110.0, "period": 2.0, "phase": phase}}),
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            Ok(())
+        })()
+    } else {
+        Ok(())
+    };
+    match r {
+        Ok(()) => {
+            // the cut-out clip stays selected, so the panel keeps its place
+            app.session.state.selection = vec![filmcraft_project::ClipId(clip)];
+            app.ui.status = tlf!("{effect} added", effect = crate::i18n::t(b.label));
+        }
         Err(e) => app.ui.status = e,
     }
 }

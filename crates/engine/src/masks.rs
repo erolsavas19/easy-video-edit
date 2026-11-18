@@ -66,7 +66,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         spec(
             "masks.follow",
             "Follow Tracked Mask",
-            r#"{"clip":id?,"effect":index|id?,"mask":n?,"target":clipId,"place":"center"|"above"?,"offset":[dx,dy]?,"extend":bool?}"#,
+            r#"{"clip":id?,"effect":index|id?,"mask":n?,"target":clipId,"place":"center"|"above"|"top"?,"offset":[dx,dy]?,"orbit":{"radius":px,"period":s,"phase":deg}?,"extend":bool?}"#,
             follow,
         ),
         spec("masks.toggleVertexSmooth", "Convert Mask Vertex", r#"{"clip":id?,"effect":index|id?,"mask":n?,"vertex":n}"#, toggle_smooth),
@@ -788,10 +788,25 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     let mi =
         u64_p(p, "mask").map(|m| m as usize).or(sel.filter(|x| x.clip == clip && x.effect == ei).map(|x| x.mask)).ok_or_else(|| bad(cmd, "need `mask`"))?;
     let mask = it.effects.get(ei).and_then(|e| e.masks.get(mi)).ok_or_else(|| bad(cmd, format!("no mask {mi}")))?;
-    let above = match str_p(p, "place").unwrap_or("center") {
-        "center" => false,
-        "above" => true,
-        x => return Err(bad(cmd, format!("place `{x}`: center or above"))),
+    // 0 the middle, 1 just above, 2 the top (a head)
+    let place = match str_p(p, "place").unwrap_or("center") {
+        "center" => 0,
+        "above" => 1,
+        "top" => 2,
+        x => return Err(bad(cmd, format!("place `{x}`: center, above or top"))),
+    };
+    // an orbit round the point: radius (sequence pixels), seconds per turn, starting angle
+    let orbit = match p.get("orbit") {
+        None | Some(Value::Null) => None,
+        Some(o) => {
+            let r = o.get("radius").and_then(Value::as_f64).unwrap_or(120.0);
+            let period = o.get("period").and_then(Value::as_f64).unwrap_or(2.0);
+            let phase = o.get("phase").and_then(Value::as_f64).unwrap_or(0.0);
+            if !(r.is_finite() && period.is_finite() && phase.is_finite()) || r < 0.0 || r > 10_000.0 || period < 0.1 || period > 600.0 {
+                return Err(bad(cmd, "`orbit`: radius 0–10000 px, period 0.1–600 s, phase in degrees"));
+            }
+            Some((r, period, phase.to_radians()))
+        }
     };
     let off = p.get("offset").and_then(pt).unwrap_or(Vec2::new(0.0, 0.0));
     if !off.x.is_finite() || !off.y.is_finite() {
@@ -801,6 +816,7 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     let par = s.project.source_par(it.item);
     // (timeline time, position in sequence pixels) for every tracked path
     let mut points: Vec<(Tick, Vec2)> = Vec::new();
+    let t0 = mask.path.keyframes.iter().map(|k| k.time).min().unwrap_or(Tick::ZERO);
     for k in &mask.path.keyframes {
         let ParamValue::Path(path) = &k.value else { continue };
         let (lo, hi) = path.bounds();
@@ -810,7 +826,20 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
         let m = filmcraft_render::motion_matrix(seq, it, src, par, k.time);
         let (a, b) = (m.apply(lo), m.apply(hi));
         let c = Vec2::new((a.x + b.x) / 2.0, (a.y + b.y) / 2.0);
-        let c = if above { Vec2::new(c.x, a.y.min(b.y) - 70.0) } else { c };
+        let (top, h) = (a.y.min(b.y), (a.y - b.y).abs());
+        let c = match place {
+            1 => Vec2::new(c.x, top - 70.0),
+            2 => Vec2::new(c.x, top + h * 0.12),
+            _ => c,
+        };
+        let c = match orbit {
+            Some((r, period, phase)) => {
+                let secs = (k.time.0 - t0.0) as f64 / filmcraft_time::TICKS_PER_SECOND as f64;
+                let ang = std::f64::consts::TAU * secs / period + phase;
+                Vec2::new(c.x + r * ang.cos(), c.y + r * 0.35 * ang.sin())
+            }
+            None => c,
+        };
         points.push((timeline_time_of(it, k.time), Vec2::new(c.x + off.x, c.y + off.y)));
     }
     if points.is_empty() {

@@ -2,8 +2,11 @@
 
 use std::path::Path;
 
-use candle_core::{DType, Device, IndexOp, Tensor};
-use candle_transformers::models::segment_anything::sam::{IMAGE_SIZE, Sam};
+use candle_core::{DType, Device, IndexOp, Module, Tensor};
+use candle_transformers::models::segment_anything::mask_decoder::MaskDecoder;
+use candle_transformers::models::segment_anything::prompt_encoder::PromptEncoder;
+use candle_transformers::models::segment_anything::sam::IMAGE_SIZE;
+use candle_transformers::models::segment_anything::tiny_vit::{TinyViT, tiny_vit_5m};
 
 use crate::{Result, SegmentError};
 
@@ -11,9 +14,14 @@ fn model_err(e: candle_core::Error) -> SegmentError {
     SegmentError::Model(e.to_string())
 }
 
-/// A loaded MobileSAM.
+/// A loaded MobileSAM: candle's parts, put together so the box itself is the prompt (candle's
+/// `Sam` takes points only, and a box is what the model was trained to follow).
 pub struct Segmenter {
-    sam: Sam,
+    encoder: TinyViT,
+    prompt: PromptEncoder,
+    decoder: MaskDecoder,
+    mean: Tensor,
+    std: Tensor,
     device: Device,
 }
 
@@ -26,8 +34,13 @@ impl Segmenter {
     pub fn load(path: &Path) -> Result<Segmenter> {
         let device = Device::Cpu;
         let vb = candle_nn::VarBuilder::from_pth(path, DType::F32, &device).map_err(model_err)?;
-        let sam = Sam::new_tiny(vb).map_err(model_err)?;
-        Ok(Segmenter { sam, device })
+        let side = IMAGE_SIZE / 16;
+        let encoder = tiny_vit_5m(vb.pp("image_encoder")).map_err(model_err)?;
+        let prompt = PromptEncoder::new(256, (side, side), (IMAGE_SIZE, IMAGE_SIZE), 16, vb.pp("prompt_encoder")).map_err(model_err)?;
+        let decoder = MaskDecoder::new(256, 3, 3, 256, vb.pp("mask_decoder")).map_err(model_err)?;
+        let mean = Tensor::new(&[123.675f32, 116.28, 103.53], &device).and_then(|t| t.reshape((3, 1, 1))).map_err(model_err)?;
+        let std = Tensor::new(&[58.395f32, 57.12, 57.375], &device).and_then(|t| t.reshape((3, 1, 1))).map_err(model_err)?;
+        Ok(Segmenter { encoder, prompt, decoder, mean, std, device })
     }
 
     /// The object in box `bx` (`[x0, y0, x1, y1]`, frame pixels) of an RGB8 frame `w` × `h`: its
@@ -68,21 +81,23 @@ impl Segmenter {
             }
         }
         let img = Tensor::from_vec(planar, (3, rh, rw), &self.device).map_err(model_err)?;
-        let t_emb = std::time::Instant::now();
-        let emb = self.sam.embeddings(&img).map_err(model_err)?;
-        if std::env::var_os("SEGMENT_TIMING").is_some() {
-            eprintln!("encoder {:?}", t_emb.elapsed());
-        }
-        // prompt: the box's middle is the object; the crop's corners (outside the box) are not
-        let rel = |x: f32, y: f32| (f64::from((x - cx0 as f32) / cw as f32), f64::from((y - cy0 as f32) / ch as f32));
-        let (mxp, myp) = rel((bx0 + bx1) / 2.0, (by0 + by1) / 2.0);
-        let mut points = vec![(mxp, myp, true)];
-        for (x, y) in [(0.02, 0.02), (0.98, 0.02), (0.02, 0.98), (0.98, 0.98)] {
-            points.push((x, y, false));
-        }
-        let (low, iou) = self.sam.forward_for_embeddings(&emb, rh, rw, &points, true).map_err(model_err)?;
-        let iou: Vec<f32> = iou.flatten_all().and_then(|t| t.to_vec1()).map_err(model_err)?;
-        let best = iou.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).map_or(0, |(i, _)| i);
+        let emb = (|| {
+            let x = img.to_dtype(DType::F32)?.broadcast_sub(&self.mean)?.broadcast_div(&self.std)?;
+            let x = x.pad_with_zeros(1, 0, IMAGE_SIZE - rh)?.pad_with_zeros(2, 0, IMAGE_SIZE - rw)?;
+            self.encoder.forward(&x.unsqueeze(0)?)
+        })()
+        .map_err(model_err)?;
+        // prompt: the box, in the scaled crop's pixels
+        let to_in = |v: f32, o: usize| (v - o as f32) * k;
+        let boxes = Tensor::new(&[[to_in(bx0, cx0), to_in(by0, cy0), to_in(bx1, cx0), to_in(by1, cy0)]], &self.device).map_err(model_err)?;
+        let (sparse, dense) = self.prompt.forward(None, Some(&boxes), None).map_err(model_err)?;
+        // candle joins the two corner embeddings side by side ([1, 512]); the decoder wants them
+        // as two tokens ([1, 2, 256])
+        let sparse = if sparse.rank() == 2 { sparse.reshape((1, (), 256)).map_err(model_err)? } else { sparse };
+        let pe = self.prompt.get_dense_pe().map_err(model_err)?;
+        // one mask: a box is not ambiguous the way a single point is
+        let (low, _iou) = self.decoder.forward(&emb, &pe, &sparse, &dense, false).map_err(model_err)?;
+        let best = 0usize;
         let grid = low.i((0, best)).map_err(model_err)?;
         let (gh, gw) = grid.dims2().map_err(model_err)?;
         let mut logits: Vec<f32> = grid.flatten_all().and_then(|t| t.to_vec1()).map_err(model_err)?;

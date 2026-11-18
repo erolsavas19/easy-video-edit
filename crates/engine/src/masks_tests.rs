@@ -580,3 +580,69 @@ fn cutout_refuses_cleanly_and_the_model_is_described() {
         assert!(s.execute("masks.cutout", bad.clone()).is_err(), "{bad}");
     }
 }
+
+/// `masks.bodyEffect`: a copy of a cut-out clip goes on a new layer under it, with the cut-out
+/// widened and tinted (glow, neon) or the whole picture with the background changed (portrait,
+/// color pop, spotlight); one undo step each, and a clip without a cut-out is refused.
+#[test]
+fn body_effects_put_a_copy_under_the_cut_out() {
+    let (mut s, clip) = tracking_session();
+    let err = s.execute("masks.bodyEffect", json!({"clip": clip.0, "effect": "glow"}));
+    assert!(err.is_err(), "no cut-out yet");
+    s.execute("masks.add", json!({"clip": clip.0, "effect": "opacity", "shape": "ellipse", "center": [160, 120], "size": [100, 140]})).unwrap();
+    s.execute("masks.set", json!({"clip": clip.0, "effect": "opacity", "mask": 0, "name": "Cutout"})).unwrap();
+    for bad in [json!({"clip": clip.0, "effect": "sparkle"}), json!({"clip": clip.0, "effect": "glow", "color": "red"}), json!({"clip": clip.0})] {
+        assert!(s.execute("masks.bodyEffect", bad.clone()).is_err(), "{bad}");
+    }
+    for (kind, fx, masks) in [
+        ("glow", "tint", 1usize),
+        ("neon", "tint", 1),
+        ("portrait", "gaussian_blur", 0),
+        ("colorPop", "black_white", 0),
+        ("spotlight", "brightness_contrast", 0),
+    ] {
+        let tracks = s.active_sequence().unwrap().video_tracks.len();
+        let r = s.execute("masks.bodyEffect", json!({"clip": clip.0, "effect": kind, "color": "#ff8800"})).unwrap();
+        let copy = filmcraft_project::ClipId(r["clip"].as_u64().unwrap());
+        let q = s.active_sequence().unwrap();
+        assert_eq!(q.video_tracks.len(), tracks + 1, "{kind}: one new layer");
+        let below = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == copy)).unwrap();
+        let orig = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == clip)).unwrap();
+        assert!(below < orig, "{kind}: the copy is under the clip");
+        let (_, it) = q.find_item(copy).unwrap();
+        assert!(it.effects.iter().any(|e| e.effect == fx), "{kind}: {fx}");
+        let op = it.effects.iter().find(|e| e.effect == "opacity").unwrap();
+        assert_eq!(op.masks.len(), masks, "{kind}: masks on the copy");
+        s.undo();
+        assert_eq!(s.active_sequence().unwrap().video_tracks.len(), tracks, "{kind}: undone");
+    }
+}
+
+/// `masks.follow` with `orbit`: the follower circles the point (an ellipse, radius × 0.35 tall).
+#[test]
+fn a_sticker_orbits_a_tracked_mask() {
+    let (mut s, clip) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    s.set_playhead(rate.tick_of(10));
+    let c = truth(10.0).apply(filmcraft_geom::Vec2::ZERO);
+    s.execute("effects.apply", json!({"effect": "gaussian_blur"})).unwrap();
+    s.execute("masks.add", json!({"effect": "gaussian_blur", "shape": "rectangle", "center": [c.x, c.y], "size": [80, 80]})).unwrap();
+    s.execute("masks.track", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "frames": 6, "wait": true})).unwrap();
+    let star =
+        s.execute("graphics.template.apply", json!({"template": "easyvideoedit:takip-ok", "time": rate.tick_of(10).0})).unwrap()["clip"].as_u64().unwrap();
+    let bad = s.execute("masks.follow", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": star, "orbit": {"radius": -5}}));
+    assert!(bad.is_err());
+    let r = s
+        .execute(
+            "masks.follow",
+            json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": star, "orbit": {"radius": 50, "period": 1.0, "phase": 0}}),
+        )
+        .unwrap();
+    assert_eq!(r["keyframes"], 7);
+    let q = s.active_sequence().unwrap();
+    let (_, t) = q.find_item(ClipId(star)).unwrap();
+    let pos = &t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"];
+    let filmcraft_project::ParamValue::Vec2(p0) = pos.keyframes[0].value else { panic!("a point") };
+    // phase 0: one radius to the right of the mask's middle
+    assert!((p0.x - c.x - 50.0).abs() < 2.0 && (p0.y - c.y).abs() < 2.0, "{p0:?} vs {c:?}");
+}
