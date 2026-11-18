@@ -615,6 +615,14 @@ pub struct PendingTrack {
     epoch: u64,
 }
 
+impl PendingTrack {
+    /// A job writing Mask Path keyframes of `target` as they arrive in `keys` (also used by
+    /// `masks.cutout`).
+    pub(crate) fn new(job: u64, target: MaskSel, seq: filmcraft_project::ItemId, keys: Arc<Mutex<Vec<(Tick, MaskPath)>>>, epoch: u64) -> Self {
+        PendingTrack { job, target, seq, keys, applied: 0, epoch }
+    }
+}
+
 /// Longest side of the frames the tracker works on (speed; the result is in clip pixels).
 const TRACK_MAX_WIDTH: f64 = 960.0;
 

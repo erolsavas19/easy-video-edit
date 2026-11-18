@@ -556,3 +556,27 @@ fn a_title_follows_a_tracked_mask() {
     let (_, t) = q.find_item(ClipId(title)).unwrap();
     assert!(t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"].keyframes.is_empty());
 }
+
+/// `masks.cutout` refuses without changing the project when it can't run (no model in this
+/// build, or the model not installed and no download asked for), and `segment.model` describes
+/// the model for the download confirmation.
+#[test]
+fn cutout_refuses_cleanly_and_the_model_is_described() {
+    let (mut s, clip) = tracking_session();
+    let info = s.execute("segment.model", json!({})).unwrap();
+    assert_eq!(info["name"], "MobileSAM");
+    assert_eq!(info["license"], "Apache-2.0");
+    assert!(info["size"].as_u64().unwrap() > 1_000_000);
+    assert!(info["url"].as_str().unwrap().starts_with("https://huggingface.co/"));
+    s.execute("effects.apply", json!({"effect": "gaussian_blur"})).unwrap();
+    s.execute("masks.add", json!({"effect": "gaussian_blur", "shape": "rectangle", "center": [160, 120], "size": [80, 80]})).unwrap();
+    let before = s.execute("history.list", json!({})).unwrap();
+    let r = s.execute("masks.cutout", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0}));
+    if !cfg!(feature = "segment") || info["installed"] == false {
+        assert!(r.is_err(), "{r:?}");
+        assert_eq!(s.execute("history.list", json!({})).unwrap(), before, "a refused cut-out changes nothing");
+    }
+    for bad in [json!({"clip": clip.0, "effect": 99, "mask": 0}), json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 7}), json!({"clip": 999_999})] {
+        assert!(s.execute("masks.cutout", bad.clone()).is_err(), "{bad}");
+    }
+}

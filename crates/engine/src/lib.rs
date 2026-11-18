@@ -16,6 +16,7 @@ pub mod captions;
 pub mod clip_ops;
 pub mod color;
 pub mod commands;
+mod cutout;
 pub mod demo;
 pub mod doc_path;
 pub mod essential_sound;
@@ -74,6 +75,7 @@ pub use commands::{CommandSpec, command_specs, find as find_command};
 pub use filmcraft_export as export;
 pub use filmcraft_project as project;
 pub use filmcraft_render as render;
+pub use filmcraft_segment as segment;
 pub use filmcraft_time as time;
 pub use media_pool::MediaPool;
 

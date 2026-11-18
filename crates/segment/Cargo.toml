@@ -1,0 +1,26 @@
+[package]
+name = "filmcraft-segment"
+description = "FilmCraft object segmentation: cut a boxed object (a person, a car…) out of a frame with MobileSAM on candle, the model catalogue entry, and the cut-out as a mask outline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = []
+# MobileSAM inference on the CPU via candle (pure Rust). Off by default and in wasm builds.
+sam = ["dep:candle-core", "dep:candle-nn", "dep:candle-transformers"]
+
+[dependencies]
+thiserror = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+candle-core = { version = "0.9", default-features = false, optional = true }
+candle-nn = { version = "0.9", default-features = false, optional = true }
+candle-transformers = { version = "0.9", default-features = false, optional = true }
+
+[[example]]
+name = "cut"
+required-features = ["sam"]

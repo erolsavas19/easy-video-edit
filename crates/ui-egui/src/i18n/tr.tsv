@@ -3878,3 +3878,18 @@
 	Cover Text	Kapatan Yazı
 	Remove Tracking	Takibi Kaldır
 	Removes the box, its effect and the attached title	Kutuyu, efektini ve bağlı yazıyı kaldırır
+	Replace Background	Arka Planı Değiştir
+	Cut out the object	Nesneyi kesip ayırın
+	This build has no background removal.	Bu derlemede arka plan kaldırma yok.
+	Balanced	Dengeli
+	Best	En İyi
+	Fast is quicker; Best follows changes of shape more closely. Track a moving object first.	Hızlı daha çabuk biter; En İyi şekil değişikliklerini daha yakından izler. Hareket eden nesneyi önce takip edin.
+	The AI model {name} ({mb} MB, {license}) is downloaded once from {source}. Your video stays on this computer.	Yapay zekâ modeli {name} ({mb} MB, {license}) {source} adresinden bir kez indirilir. Videonuz bu bilgisayarda kalır.
+	Cut Out	Kes ve Ayır
+	Download Model and Cut Out	Modeli İndir ve Kes
+	✔ Background removed	✔ Arka plan kaldırıldı
+	Choose the new background	Yeni arka planı seçin
+	Import a picture or video in Media to use it as the background.	Arka plan olarak kullanmak için Medya'ya bir resim ya da video aktarın.
+	Use	Kullan
+	✔ The background is on the layer under the video	✔ Arka plan videonun altındaki katmanda
+	Cut Out Object	Nesne Kesiliyor

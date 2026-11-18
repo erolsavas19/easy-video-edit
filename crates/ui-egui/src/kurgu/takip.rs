@@ -19,13 +19,17 @@ enum Action {
     Cover,
     TextAbove,
     Arrow,
+    Background,
 }
 
-const ACTIONS: [Action; 5] = [Action::Blur, Action::Mosaic, Action::Cover, Action::TextAbove, Action::Arrow];
+const ACTIONS: [Action; 6] = [Action::Background, Action::Blur, Action::Mosaic, Action::Cover, Action::TextAbove, Action::Arrow];
+
+/// The Action index of Replace Background (the Tools card opens the panel on it).
+pub const BACKGROUND_ACTION: u8 = 0;
 
 impl Action {
     fn from_u8(v: u8) -> Action {
-        ACTIONS.get(usize::from(v)).copied().unwrap_or(Action::Blur)
+        ACTIONS.get(usize::from(v)).copied().unwrap_or(Action::Background)
     }
     fn index(self) -> u8 {
         ACTIONS.iter().position(|a| *a == self).and_then(|i| u8::try_from(i).ok()).unwrap_or(0)
@@ -37,6 +41,7 @@ impl Action {
             Action::Cover => tl!("Text Over It"),
             Action::TextAbove => tl!("Text Above It"),
             Action::Arrow => tl!("Arrow"),
+            Action::Background => tl!("Replace Background"),
         }
     }
     fn icon(self) -> Icon {
@@ -45,6 +50,7 @@ impl Action {
             Action::Mosaic => Icon::Grid,
             Action::Cover | Action::TextAbove => Icon::Type,
             Action::Arrow => Icon::TrackMaskFwd,
+            Action::Background => Icon::Image,
         }
     }
     /// The effect the box (a mask) sits on, and its settings.
@@ -77,7 +83,18 @@ pub struct TrackPanel {
     pub job: Option<u64>,
     /// The title that follows it.
     pub follower: Option<u64>,
+    /// Replace Background: the cut-out job, the Cutout mask (clip, Opacity index, mask index),
+    /// how often the model runs (0 fast, 1 balanced, 2 best) and the background placed under it.
+    pub cut_job: Option<u64>,
+    pub cut_mask: Option<(u64, usize, usize)>,
+    pub quality: u8,
+    pub background: Option<u64>,
+    /// `segment.model`: (available in this build, installed), read once.
+    pub model: Option<(bool, bool)>,
 }
+
+/// Frames between the model's results for each quality.
+const QUALITY_STEP: [u64; 3] = [10, 5, 2];
 
 /// The first selected video clip of the timeline: (clip, name, source width and height).
 fn selected_video(app: &FilmcraftApp) -> Option<(filmcraft_project::ClipId, String, (u32, u32))> {
@@ -120,7 +137,25 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         let total = j.progress.total.load(Ordering::Relaxed).max(1);
         (j.progress.done.load(Ordering::Relaxed) as f32 / total as f32, j.progress.status.lock().map(|s| s.clone()).unwrap_or_default())
     });
-    if running.is_some() {
+    let cutting = app
+        .ui
+        .kurgu
+        .track
+        .cut_job
+        .and_then(|id| app.session.jobs.iter().find(|j| j.id == id))
+        .filter(|j| !j.progress.finished.load(std::sync::atomic::Ordering::Relaxed));
+    let cut_progress = cutting.map(|j| {
+        use std::sync::atomic::Ordering;
+        let total = j.progress.total.load(Ordering::Relaxed).max(1);
+        (j.progress.done.load(Ordering::Relaxed) as f32 / total as f32, j.progress.status.lock().map(|s| s.clone()).unwrap_or_default())
+    });
+    // the result of a finished cut-out (an error stays in the panel)
+    let cut_error =
+        app.ui.kurgu.track.cut_job.and_then(|id| app.session.jobs.iter().find(|j| j.id == id)).and_then(|j| match j.result.lock().map(|r| r.clone()) {
+            Ok(Some(Err(e))) => Some(e),
+            _ => None,
+        });
+    if running.is_some() || cutting.is_some() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(100));
     }
     let inner = rect.shrink2(vec2(12.0, 8.0));
@@ -247,8 +282,13 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             }
         }
 
-        // 5. attach the title or arrow
+        // 5. Replace Background: cut the object out, then put a picture under it
         let action = Action::from_u8(app.ui.kurgu.track.action);
+        if action == Action::Background {
+            background_steps(app, ui, &t, target, progress.is_some(), cut_progress, cut_error);
+        }
+
+        // 5. attach the title or arrow
         if action.follower().is_some() {
             step(ui, &t, "5", tl!("Attach"));
             let tracked = target.and_then(|tg| target_state(app, tg)).unwrap_or(0) > 0 && progress.is_none();
@@ -267,6 +307,172 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             );
         }
     });
+}
+
+/// Steps 5 and 6 of Replace Background.
+fn background_steps(
+    app: &mut FilmcraftApp,
+    ui: &mut egui::Ui,
+    t: &Tokens,
+    target: Option<(u64, usize, usize)>,
+    tracking: bool,
+    cut_progress: Option<(f32, String)>,
+    cut_error: Option<String>,
+) {
+    step(ui, t, "5", tl!("Cut out the object"));
+    let (available, installed) = *app.ui.kurgu.track.model.get_or_insert_with(|| {
+        let v = app.session.execute("segment.model", json!({})).unwrap_or_default();
+        (v["available"].as_bool().unwrap_or(false), v["installed"].as_bool().unwrap_or(false))
+    });
+    if !available {
+        hint(ui, t, tl!("This build has no background removal."));
+        return;
+    }
+    match &cut_progress {
+        Some((p, status)) => {
+            ui.add(egui::ProgressBar::new(*p).show_percentage());
+            if !status.is_empty() {
+                hint(ui, t, status);
+            }
+            if small_button(ui, t, tl!("Stop"), "kurgu.cutout.stop").clicked()
+                && let Some(j) = app.ui.kurgu.track.cut_job.and_then(|id| app.session.jobs.iter().find(|j| j.id == id))
+            {
+                j.progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+        }
+        None => {
+            ui.horizontal(|ui| {
+                for (i, label) in [tl!("Fast"), tl!("Balanced"), tl!("Best")].into_iter().enumerate() {
+                    let q = u8::try_from(i).unwrap_or(0);
+                    if ui.selectable_label(app.ui.kurgu.track.quality == q, egui::RichText::new(label).size(11.5)).clicked() {
+                        app.ui.kurgu.track.quality = q;
+                    }
+                }
+            });
+            hint(ui, t, tl!("Fast is quicker; Best follows changes of shape more closely. Track a moving object first."));
+            let m = filmcraft_engine::segment::MODEL;
+            if !installed {
+                let mb = format!("{:.1}", m.file.size as f64 / 1_000_000.0);
+                hint(
+                    ui,
+                    t,
+                    &tlf!(
+                        "The AI model {name} ({mb} MB, {license}) is downloaded once from {source}. Your video stays on this computer.",
+                        name = m.name,
+                        mb = mb,
+                        license = m.license,
+                        source = m.source
+                    ),
+                );
+            }
+            let label = if installed { tl!("Cut Out") } else { tl!("Download Model and Cut Out") };
+            let ok = target.is_some() && !tracking;
+            if big_button(app, ui, t, label, "kurgu.cutout.start", ok, true).clicked() {
+                cut(app, !installed);
+            }
+            if let Some(e) = cut_error {
+                ui.label(egui::RichText::new(e).size(11.0).color(t.danger));
+            } else if app.ui.kurgu.track.cut_mask.is_some() && app.ui.kurgu.track.cut_job.is_some() {
+                ui.label(egui::RichText::new(tl!("✔ Background removed")).size(12.0).color(t.accent));
+            }
+        }
+    }
+
+    // 6. the new background
+    step(ui, t, "6", tl!("Choose the new background"));
+    let done = app.ui.kurgu.track.cut_mask.is_some() && cut_progress.is_none();
+    let own = target.and_then(|(clip, _, _)| app.session.active_sequence()?.find_item(filmcraft_project::ClipId(clip)).map(|(_, it)| it.item));
+    let mut items: Vec<(filmcraft_project::ItemId, String)> = app
+        .session
+        .project
+        .items
+        .values()
+        .filter(|i| i.has_video() && Some(i.id) != own && matches!(i.kind, filmcraft_project::ItemKind::Media(_)))
+        .map(|i| (i.id, i.name.clone()))
+        .collect();
+    items.sort_by(|a, b| a.1.cmp(&b.1));
+    if items.is_empty() {
+        hint(ui, t, tl!("Import a picture or video in Media to use it as the background."));
+    }
+    for (id, name) in items {
+        ui.horizontal(|ui| {
+            let r = ui.add_enabled(done, egui::Button::new(egui::RichText::new(tl!("Use")).size(11.5)).corner_radius(6));
+            ui.label(egui::RichText::new(name).size(12.0).color(t.text));
+            if r.clicked() {
+                place_background(app, id);
+            }
+        });
+    }
+    if app.ui.kurgu.track.background.is_some() {
+        ui.label(egui::RichText::new(tl!("✔ The background is on the layer under the video")).size(12.0).color(t.accent));
+    }
+}
+
+/// Starts the cut-out of the box (downloading the model first when asked).
+fn cut(app: &mut FilmcraftApp, download: bool) {
+    let Some((clip, effect, mask)) = app.ui.kurgu.track.target else { return };
+    let step = QUALITY_STEP.get(usize::from(app.ui.kurgu.track.quality)).copied().unwrap_or(5);
+    // a new cut-out replaces the previous one
+    remove_cut(app);
+    match app.session.execute("masks.cutout", json!({"clip": clip, "effect": effect, "mask": mask, "step": step, "download": download})) {
+        Ok(r) => {
+            app.ui.kurgu.track.cut_job = r["job"].as_u64();
+            let (oi, mo) = (r["effect"].as_u64().unwrap_or(0) as usize, r["mask"].as_u64().unwrap_or(0) as usize);
+            app.ui.kurgu.track.cut_mask = Some((clip, oi, mo));
+            // installed now (or being downloaded): read again
+            app.ui.kurgu.track.model = None;
+        }
+        Err(e) => app.ui.status = e.to_string(),
+    }
+}
+
+/// Takes the Cutout mask off the clip (and stops its job).
+fn remove_cut(app: &mut FilmcraftApp) {
+    if let Some(j) = app.ui.kurgu.track.cut_job.and_then(|id| app.session.jobs.iter().find(|j| j.id == id)) {
+        j.progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+    if let Some((clip, effect, mask)) = app.ui.kurgu.track.cut_mask.take() {
+        let exists = app
+            .session
+            .active_sequence()
+            .and_then(|q| q.find_item(filmcraft_project::ClipId(clip)))
+            .is_some_and(|(_, it)| it.effects.get(effect).is_some_and(|e| mask < e.masks.len()));
+        if exists && let Err(e) = app.session.execute("masks.remove", json!({"clip": clip, "effect": effect, "mask": mask})) {
+            app.ui.status = e.to_string();
+        }
+    }
+    app.ui.kurgu.track.cut_job = None;
+}
+
+/// Puts `item` on a new bottom video layer under the clip, as long as the clip.
+fn place_background(app: &mut FilmcraftApp, item: filmcraft_project::ItemId) {
+    let Some((clip, _, _)) = app.ui.kurgu.track.target else { return };
+    let Some((start, dur)) = app.session.active_sequence().and_then(|q| q.find_item(filmcraft_project::ClipId(clip))).map(|(_, it)| (it.start, it.duration))
+    else {
+        return;
+    };
+    // a background placed before goes: the new one takes its place
+    if let Some(old) = app.ui.kurgu.track.background.take()
+        && app.session.active_sequence().is_some_and(|q| q.find_item(filmcraft_project::ClipId(old)).is_some())
+    {
+        let _ = app.session.execute("edit.clear", json!({"clip": old}));
+    }
+    let r = (|| -> Result<u64, String> {
+        app.session.execute("sequence.addTracks", json!({"video": 1, "audio": 0, "videoAfter": "first"})).map_err(|e| e.to_string())?;
+        let placed = app
+            .session
+            .execute("timeline.place", json!({"item": item.0, "time": start.0, "track": "V1", "duration": dur.0, "audio": false, "insert": false}))
+            .map_err(|e| e.to_string())?;
+        Ok(placed["clip"].as_u64().or_else(|| placed["clips"].get(0).and_then(serde_json::Value::as_u64)).unwrap_or(0))
+    })();
+    match r {
+        Ok(id) => {
+            app.ui.kurgu.track.background = Some(id);
+            // the cut-out clip stays selected, so the panel keeps its place
+            app.session.state.selection = vec![filmcraft_project::ClipId(clip)];
+        }
+        Err(e) => app.ui.status = e,
+    }
 }
 
 fn step(ui: &mut egui::Ui, t: &Tokens, n: &str, label: &str) {
@@ -331,7 +537,11 @@ fn mark(app: &mut FilmcraftApp, clip: filmcraft_project::ClipId, size: (u32, u32
             .execute("masks.add", json!({"clip": clip.0, "effect": ei, "shape": "rectangle", "center": [w / 2.0, h / 2.0], "size": [w * 0.22, h * 0.22]}))
             .map_err(|e| e.to_string())?;
         let mi = m["mask"].as_u64().map_or(0, |v| v as usize);
-        app.session.execute("masks.set", json!({"clip": clip.0, "effect": ei, "mask": mi, "feather": 4.0})).map_err(|e| e.to_string())?;
+        // a background cut-out follows the box's place only: a turning box drifts off the object
+        let method = if action == Action::Background { "position" } else { "positionRotation" };
+        app.session
+            .execute("masks.set", json!({"clip": clip.0, "effect": ei, "mask": mi, "feather": 4.0, "trackMethod": method}))
+            .map_err(|e| e.to_string())?;
         Ok((ei, mi))
     })();
     match r {
@@ -346,7 +556,13 @@ fn mark(app: &mut FilmcraftApp, clip: filmcraft_project::ClipId, size: (u32, u32
 /// Takes the tracking away: the attached title, then the box's effect (with the box), and stops a
 /// running track first.
 fn remove(app: &mut FilmcraftApp) {
+    remove_cut(app);
     let st = app.ui.kurgu.track.clone();
+    if let Some(bg) = st.background
+        && app.session.active_sequence().is_some_and(|q| q.find_item(filmcraft_project::ClipId(bg)).is_some())
+    {
+        let _ = app.session.execute("edit.clear", json!({"clip": bg}));
+    }
     if let Some(j) = st.job.and_then(|id| app.session.jobs.iter().find(|j| j.id == id)) {
         j.progress.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
     }
@@ -365,7 +581,7 @@ fn remove(app: &mut FilmcraftApp) {
     if let Some(e) = err {
         app.ui.status = e;
     }
-    app.ui.kurgu.track = TrackPanel { action: st.action, ..Default::default() };
+    app.ui.kurgu.track = TrackPanel { action: st.action, quality: st.quality, ..Default::default() };
 }
 
 fn track(app: &mut FilmcraftApp, direction: &str) {

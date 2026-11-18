@@ -182,7 +182,14 @@ impl FilmcraftApp {
         let shown = match self.job_text.take().filter(|s| s.job == job.id) {
             Some(s) if (s.at..s.at + panels::JobText::EVERY).contains(&now) => s,
             old => {
-                let verb = if job.label.starts_with("Rendering") { crate::i18n::t(&job.label).to_string() } else { tl!("Exporting").to_string() };
+                let verb = if job.label.starts_with("Rendering") || job.label == "Cut Out Object" {
+                    crate::i18n::t(&job.label).to_string()
+                } else if job.label.starts_with("Track ") {
+                    // a mask tracking job ("Track Mask (1) (forward)")
+                    tl!("Object Tracking").to_string()
+                } else {
+                    tl!("Exporting").to_string()
+                };
                 let label = format!("{:.0}%{}", f * 100.0, eta.map(panels::left_text).unwrap_or_default());
                 let text = format!("{verb}… {label}");
                 // room from the start for 100 % and the longest time shown (99:59:59), so no estimate

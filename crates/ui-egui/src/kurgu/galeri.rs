@@ -797,7 +797,7 @@ pub const TOOLS: &[ToolDef] = &[
         group: "Background",
         effect: None,
         command: None,
-        soon: true,
+        soon: false,
         keywords: "background removal remove background person cutout arka plan kaldır arka planı sil kişi seç dekupe yapay zeka",
     },
     tool("tool:stabilize", "Stabilize", Icon::Camera, "Picture", "warp_stabilizer", "stabilize stabilizer warp shake sabitle sabitleme titreme sarsıntı"),
@@ -879,6 +879,12 @@ fn apply_tool(app: &mut FilmcraftApp, ctx: &egui::Context, key: &str) {
     }
     if def.key == "tool:track" {
         // the Tracking tab on the right walks through it
+        app.ui.kurgu.right_tab = 2;
+    } else if def.key == "tool:bgremove" {
+        // so does Replace Background, its first choice
+        if app.ui.kurgu.track.target.is_none() {
+            app.ui.kurgu.track.action = super::takip::BACKGROUND_ACTION;
+        }
         app.ui.kurgu.right_tab = 2;
     } else if let Some(id) = def.effect {
         apply_effect(app, id);
