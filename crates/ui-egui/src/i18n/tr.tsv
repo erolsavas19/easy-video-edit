@@ -3923,3 +3923,6 @@
 	Tracked objects on this clip	Bu klipte takip edilen nesneler
 	Marked object	İşaretli nesne
 	{n} frames	{n} kare
+	Version {version} · based on FilmCraft {base}	Sürüm {version} · FilmCraft {base} tabanlı
+	A simple video editor built on FilmCraft, a clean-room, pure-Rust video editor of the ArtCraft family.	FilmCraft üzerine kurulu, kolay kullanımlı bir video düzenleyici. FilmCraft, ArtCraft ailesinden, temiz oda prensibiyle saf Rust ile yazılmış bir video düzenleyicidir.
+	Opens the Easy Video Edit download page, which shows the latest version.	Easy Video Edit indirme sayfasını açar; en son sürüm orada görünür.

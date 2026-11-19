@@ -1,6 +1,13 @@
 //! Easy Video Edit's mark (its app icon, `assets/app-icon/`), decoded once and kept as a texture.
 //! FilmCraft shows the ArtCraft wordmark here; a fork must not (AGENTS.md §1.8).
 
+/// Easy Video Edit's own version (About window, the download page). FilmCraft's, which it is
+/// built on, stays the crates' version, so FilmCraft's changes merge without touching it.
+pub const VERSION: &str = "1.0.0";
+
+/// Where Easy Video Edit is downloaded: Help ▸ Check for Updates opens it.
+pub const DOWNLOAD_PAGE: &str = "https://www.freewaretr.com/app/easyvideoedit";
+
 const LOGO_LIGHT_INK: &[u8] = include_bytes!("../../../assets/app-icon/easyvideoedit-256.png");
 const LOGO_DARK_INK: &[u8] = include_bytes!("../../../assets/app-icon/easyvideoedit-256.png");
 

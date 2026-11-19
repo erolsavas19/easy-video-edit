@@ -508,7 +508,9 @@ pub fn invoke_command(app: &mut FilmcraftApp, ctx: &egui::Context, id: &str, mut
             return Ok(Value::Null);
         }
         "app.checkForUpdates" => {
-            let _ = crate::updates_ui::check(app);
+            // Easy Video Edit: FilmCraft's releases are not its own; its download page shows the
+            // latest version
+            crate::links::open(app, ctx, crate::brand::DOWNLOAD_PAGE);
             return Ok(serde_json::Value::Null);
         }
         "app.about" => {

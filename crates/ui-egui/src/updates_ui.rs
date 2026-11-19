@@ -47,6 +47,8 @@ impl FilmcraftApp {
     }
 }
 
+// Easy Video Edit: Help ▸ Check for Updates opens its download page instead; kept for FilmCraft merges
+#[allow(dead_code)]
 pub(crate) fn check(app: &mut FilmcraftApp) -> Result<Value, String> {
     #[cfg(not(target_arch = "wasm32"))]
     {

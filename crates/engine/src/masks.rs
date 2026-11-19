@@ -625,6 +625,9 @@ impl PendingTrack {
 
 /// Longest side of the frames the tracker works on (speed; the result is in clip pixels).
 const TRACK_MAX_WIDTH: f64 = 960.0;
+/// Tracking by look: how long an object may be out of sight (behind a tree, a passer-by) and
+/// still be taken back when it is seen again.
+const HIDDEN_SECONDS: f64 = 1.5;
 
 fn track(s: &mut Session, p: &Value) -> Result<Value> {
     let clip = target_clip(s, p)?;
@@ -699,6 +702,17 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
         };
         let mut path = start_path;
         let mut look: Option<filmcraft_render::track_look::Look> = None;
+        // the object out of sight: frames it has been gone, where it was last seen, the boxes
+        // guessed meanwhile
+        struct Hidden {
+            last: filmcraft_render::track_look::LookBox,
+            missed: usize,
+            seen: usize,
+            pending: Vec<(Tick, MaskPath)>,
+        }
+        let mut hidden: Option<Hidden> = None;
+        // how long it may stay out of sight before it is given up
+        let max_hidden = ((HIDDEN_SECONDS * filmcraft_time::TICKS_PER_SECOND as f64) / fd.0.max(1) as f64).clamp(1.0, 240.0) as usize;
         let mut err: Option<String> = None;
         let mut done = 0u64;
         match gray(mt0) {
@@ -732,10 +746,35 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                         if look.is_none() {
                             look = filmcraft_render::track_look::Look::new(&prev, bx);
                         }
-                        let found = look.as_mut().and_then(|l| l.step(&next, bx));
-                        let Some((nb, score)) = found else {
+                        let Some(l) = look.as_mut() else {
                             err = Some(format!("lost track after {} frame(s): the object is no longer seen", step - 1));
                             break;
+                        };
+                        // out of sight (behind a tree, a passer-by): the box goes on the way the
+                        // object went, and its frames are kept only once it is seen again
+                        let found = match &hidden {
+                            None => l.step(&next, bx),
+                            Some(h) => {
+                                let guess = l.predict(bx);
+                                l.find_again(&next, h.last, guess, h.missed)
+                            }
+                        };
+                        let (nb, score) = match found {
+                            Some(f) => {
+                                if let Some(h) = hidden.take() {
+                                    done += h.pending.len() as u64;
+                                    lock(&out).extend(h.pending);
+                                }
+                                f
+                            }
+                            None => {
+                                let h = hidden.get_or_insert_with(|| Hidden { last: bx, missed: 0, seen: step - 1, pending: Vec::new() });
+                                if h.missed >= max_hidden {
+                                    break;
+                                }
+                                h.missed += 1;
+                                (l.predict(bx), 0.0)
+                            }
                         };
                         let s = f64::from(nb.w / bx.w.max(1e-3));
                         if !s.is_finite() || s <= 0.0 {
@@ -748,10 +787,18 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                             .then_apply(&Affine::translate(-f64::from(bx.cx), -f64::from(bx.cy)));
                         let m = Affine::scale(1.0 / k, 1.0 / k).then_apply(&st).then_apply(&Affine::scale(k_prev, k_prev));
                         path = path.transformed(&m);
-                        lock(&out).push((t, path.clone()));
-                        done += 1;
-                        prog.done.store(done, Ordering::Relaxed);
-                        *lock(&prog.status) = format!("Frame {step} of {steps} · match {:.0} %", score * 100.0);
+                        match &mut hidden {
+                            Some(h) => {
+                                h.pending.push((t, path.clone()));
+                                *lock(&prog.status) = format!("Frame {step} of {steps} · out of sight, looking for it");
+                            }
+                            None => {
+                                lock(&out).push((t, path.clone()));
+                                done += 1;
+                                *lock(&prog.status) = format!("Frame {step} of {steps} · match {:.0} %", score * 100.0);
+                            }
+                        }
+                        prog.done.store(step as u64, Ordering::Relaxed);
                         prev = next;
                         k_prev = k;
                         continue;
@@ -777,8 +824,15 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                     prev = next;
                     k_prev = k;
                 }
+                // never seen again (or the clip ended first): the guessed boxes are dropped
+                if let Some(h) = &hidden
+                    && err.is_none()
+                {
+                    err = Some(format!("lost track after {} frame(s): the object is no longer seen", h.seen));
+                }
             }
         }
+        prog.done.store(done, Ordering::Relaxed);
         let secs = t0.elapsed().as_secs_f64();
         let r = match &err {
             // stopping keeps what was tracked

@@ -456,6 +456,10 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     {
         app.ui.kurgu.timeline_share = ((timeline_h - dy) / rest.height()).clamp(0.18, 0.7);
     }
+    // the dragged item's label near the pointer, and the drag ends once the button comes up (as in
+    // the full layout): a drop that no panel took, such as the one that makes the first sequence on
+    // an empty timeline, must not leave the item stuck to the pointer to be placed again
+    crate::panels::drag_ghost(app, ui);
 }
 
 /// Height of the "+" (add layer) button under the editing tools.

@@ -26,6 +26,17 @@ const ANCHOR: f32 = 0.4;
 pub const LOST_SCORE: f32 = 0.35;
 /// Smallest box side, in frame pixels.
 const MIN_SIDE: f32 = 6.0;
+/// Best ZNCC needed to take a hidden object back: higher than [`LOST_SCORE`], so a look-alike
+/// round the place where it was expected is not taken for it.
+pub const FOUND_AGAIN: f32 = 0.45;
+/// Least ZNCC with the first frame's look for a hidden object to be taken back.
+const FIRST_AGAIN: f32 = 0.3;
+/// Below this score something is in front of the object: its picture is not learned.
+const LEARN_SCORE: f32 = 0.7;
+/// The surroundings compared when a hidden object is looked for, as a multiple of its box.
+const AROUND: f32 = 3.0;
+/// How far the search reaches while the object is hidden, at most, in frame pixels.
+const HIDDEN_REACH: f32 = 220.0;
 
 /// An axis-aligned box: centre and size, in frame pixels.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -48,10 +59,40 @@ pub struct Look {
     first: Vec<f32>,
     /// the last frame's movement: where to expect the object next
     vel: (f32, f32),
+    /// the movement over the last frames, smoothed: where a hidden object is going
+    drift: (f32, f32),
+    /// how much the object's picture varies, smoothed: a hidden object is taken back only where
+    /// the picture varies about as much
+    contrast: f32,
+    /// the look of the box's surroundings ([`AROUND`] times its size): tells a hidden object
+    /// from a look-alike elsewhere (a number plate from the rear window above it)
+    around: Option<Vec<f32>>,
+}
+
+/// `b` grown about its centre to take in its surroundings.
+fn around(b: LookBox) -> LookBox {
+    LookBox { w: b.w * AROUND, h: b.h * AROUND, ..b }
 }
 
 /// The template-sized patch of `g` under `b`, zero-mean and unit-norm; `None` when flat.
 fn patch(p: &Prepared, b: LookBox, tw: usize, th: usize) -> Option<Vec<f32>> {
+    let mut v = samples(p, b, tw, th);
+    normalise(&mut v).then_some(v)
+}
+
+/// How much the picture under `b` varies (the standard deviation of its samples). ZNCC does not
+/// see it: a faint shading of the ground can match the shape of a dark object.
+fn contrast(p: &Prepared, b: LookBox, tw: usize, th: usize) -> f32 {
+    let v = samples(p, b, tw, th);
+    if v.is_empty() {
+        return 0.0;
+    }
+    let mean = v.iter().sum::<f32>() / v.len() as f32;
+    (v.iter().map(|x| (x - mean) * (x - mean)).sum::<f32>() / v.len() as f32).sqrt()
+}
+
+/// The template-sized samples of the picture under `b`.
+fn samples(p: &Prepared, b: LookBox, tw: usize, th: usize) -> Vec<f32> {
     // the pyramid level whose pixels are about as far apart as the samples: no aliasing on fine
     // texture, and a smooth score for the search
     let spacing = (b.w / tw as f32).max(b.h / th as f32);
@@ -70,7 +111,7 @@ fn patch(p: &Prepared, b: LookBox, tw: usize, th: usize) -> Option<Vec<f32>> {
             v.push(g.sample(x, y));
         }
     }
-    normalise(&mut v).then_some(v)
+    v
 }
 
 fn normalise(v: &mut [f32]) -> bool {
@@ -108,7 +149,17 @@ impl Look {
         let tw = ((TEMPLATE_SIDE as f32 * b.w / long).round() as usize).clamp(8, TEMPLATE_SIDE);
         let th = ((TEMPLATE_SIDE as f32 * b.h / long).round() as usize).clamp(8, TEMPLATE_SIDE);
         let tpl = patch(p, b, tw, th)?;
-        Some(Look { tw, th, first: tpl.clone(), tpl, vel: (0.0, 0.0) })
+        let contrast = contrast(p, b, tw, th);
+        let around = patch(p, around(b), tw, th);
+        Some(Look { tw, th, first: tpl.clone(), tpl, vel: (0.0, 0.0), drift: (0.0, 0.0), contrast, around })
+    }
+
+    /// How much the surroundings of `b` look like the object's did (ZNCC; 0 when unknown).
+    fn around_score(&self, p: &Prepared, b: LookBox) -> f32 {
+        match (&self.around, patch(p, around(b), self.tw, self.th)) {
+            (Some(a), Some(q)) => q.iter().zip(a).map(|(x, y)| x * y).sum(),
+            _ => 0.0,
+        }
     }
 
     fn score(&self, p: &Prepared, b: LookBox) -> f32 {
@@ -122,11 +173,86 @@ impl Look {
     /// Finds the object in `g` near `b` (its box in the previous frame): the new box and its score,
     /// or `None` when it is lost.
     pub fn step(&mut self, p: &Prepared, b: LookBox) -> Option<(LookBox, f32)> {
-        let g = p.base();
         let reach = (0.35 * b.w.max(b.h)).clamp(6.0, 120.0);
         // coarse grid, then a fine one round the best
         let coarse = (reach / 10.0).max(1.0);
-        let expect = (b.cx + self.vel.0, b.cy + self.vel.1);
+        let c2 = self.search(p, b, (b.cx + self.vel.0, b.cy + self.vel.1), reach, coarse, false)?;
+        let raw = self.score(p, c2);
+        if !raw.is_finite() || raw < LOST_SCORE {
+            return None;
+        }
+        if raw >= LEARN_SCORE {
+            self.learn(p, b, c2, 1.0);
+        } else {
+            // half hidden (something passes in front): follow it, but do not take in the picture
+            // in front, nor its movement as the object's
+            self.vel = (c2.cx - b.cx, c2.cy - b.cy);
+        }
+        Some((c2, raw))
+    }
+
+    /// Where a hidden object is expected one frame after `b`: it keeps going the way it went.
+    pub fn predict(&self, b: LookBox) -> LookBox {
+        LookBox { cx: b.cx + self.drift.0, cy: b.cy + self.drift.1, ..b }
+    }
+
+    /// Looks for a hidden object (behind a tree, a passer-by) round `b`, the place it is expected
+    /// now after `missed` frames out of sight; `last` is its last seen box. The search widens the
+    /// longer it has been gone. The new box and its score, or `None` while it is still hidden.
+    pub fn find_again(&mut self, p: &Prepared, last: LookBox, b: LookBox, missed: usize) -> Option<(LookBox, f32)> {
+        if !(b.cx.is_finite() && b.cy.is_finite() && b.w.is_finite() && b.h.is_finite()) {
+            return None;
+        }
+        // the camera may turn meanwhile: the search widens quickly
+        let reach = ((0.35 * b.w.max(b.h)).max(12.0) * (1.0 + 0.5 * missed.min(100) as f32)).min(HIDDEN_REACH);
+        // a grid fine enough not to step over a small object
+        let stride = (reach / 10.0).min(b.w.min(b.h) / 3.0).max(1.0);
+        // ranked with the surroundings too: far from where it was last seen, a look-alike is
+        // more likely than up close
+        let c = self.search(p, b, (b.cx, b.cy), reach, stride, true)?;
+        let raw = self.score(p, c);
+        if !raw.is_finite() || raw < FOUND_AGAIN {
+            return None;
+        }
+        let ratio = contrast(p, c, self.tw, self.th) / self.contrast.max(1e-4);
+        // it must look like the object did when it was marked, too: the learned look may have
+        // taken in some of what passed in front
+        let first: f32 = patch(p, c, self.tw, self.th).map_or(-1.0, |q| q.iter().zip(&self.first).map(|(a, f)| a * f).sum());
+        if !(0.5..=2.0).contains(&ratio) || first.is_nan() || first < FIRST_AGAIN {
+            return None;
+        }
+        self.learn(p, last, c, missed.min(100) as f32 + 1.0);
+        Some((c, raw))
+    }
+
+    /// Takes in a little of the picture under `c` and remembers the move from `b` to `c` over
+    /// `steps` frames.
+    fn learn(&mut self, p: &Prepared, b: LookBox, c: LookBox, steps: f32) {
+        if let Some(np) = patch(p, c, self.tw, self.th) {
+            let mut t: Vec<f32> = self.tpl.iter().zip(&np).map(|(a, b)| a * (1.0 - LEARN) + b * LEARN).collect();
+            if normalise(&mut t) {
+                self.tpl = t;
+            }
+        }
+        if let (Some(a), Some(q)) = (&self.around, patch(p, around(c), self.tw, self.th)) {
+            let mut t: Vec<f32> = a.iter().zip(&q).map(|(a, b)| a * (1.0 - LEARN) + b * LEARN).collect();
+            if normalise(&mut t) {
+                self.around = Some(t);
+            }
+        }
+        let now = contrast(p, c, self.tw, self.th);
+        if now.is_finite() {
+            self.contrast = 0.9 * self.contrast + 0.1 * now;
+        }
+        let steps = steps.max(1.0);
+        self.vel = ((c.cx - b.cx) / steps, (c.cy - b.cy) / steps);
+        self.drift = (0.7 * self.drift.0 + 0.3 * self.vel.0, 0.7 * self.drift.1 + 0.3 * self.vel.1);
+    }
+
+    /// The best box round `expect` within `reach` (a coarse grid of `stride`, then 1 px), its size
+    /// near `b`'s.
+    fn search(&self, p: &Prepared, b: LookBox, expect: (f32, f32), reach: f32, stride: f32, with_around: bool) -> Option<LookBox> {
+        let g = p.base();
         let best = |centre: (f32, f32), radius: f32, stride: f32, scales: &[f32], size: (f32, f32)| -> Option<(LookBox, f32)> {
             let n = (radius / stride).ceil() as i32;
             let cands: Vec<LookBox> = (-n..=n)
@@ -149,25 +275,14 @@ impl Look {
                     // and for where it was heading: a look-alike further off must not win
                     let dx = (c.cx - expect.0) / reach;
                     let dy = (c.cy - expect.1) / reach;
-                    (*c, self.score(p, *c) - 0.02 * ds - 0.25 * (dx * dx + dy * dy))
+                    let ctx = if with_around { self.around_score(p, *c) } else { 0.0 };
+                    (*c, self.score(p, *c) + ctx - 0.02 * ds - 0.25 * (dx * dx + dy * dy))
                 })
                 .max_by(|a, b| a.1.total_cmp(&b.1))
         };
-        let (c1, _) = best(expect, reach, coarse, &SCALES, (b.w, b.h))?;
-        let (c2, _) = best((c1.cx, c1.cy), coarse, 1.0, &FINE_SCALES, (c1.w, c1.h))?;
-        let raw = self.score(p, c2);
-        if !raw.is_finite() || raw < LOST_SCORE {
-            return None;
-        }
-        // take in a little of the new look
-        if let Some(np) = patch(p, c2, self.tw, self.th) {
-            let mut t: Vec<f32> = self.tpl.iter().zip(&np).map(|(a, b)| a * (1.0 - LEARN) + b * LEARN).collect();
-            if normalise(&mut t) {
-                self.tpl = t;
-            }
-        }
-        self.vel = (c2.cx - b.cx, c2.cy - b.cy);
-        Some((c2, raw))
+        let (c1, _) = best(expect, reach, stride, &SCALES, (b.w, b.h))?;
+        let (c2, _) = best((c1.cx, c1.cy), stride, 1.0, &FINE_SCALES, (c1.w, c1.h))?;
+        Some(c2)
     }
 }
 
@@ -211,6 +326,36 @@ mod tests {
     }
 
     #[test]
+    fn finds_an_object_again_after_it_was_hidden() {
+        // a dark disc moving right, hidden for 8 frames, then seen again further on
+        let (w, h) = (320, 200);
+        let (mut cx, cy, r) = (60.0f32, 100.0f32, 12.0f32);
+        let mut b = LookBox { cx, cy, w: 30.0, h: 30.0 };
+        let mut look = Look::new(&frame(w, h, cx, cy, r), b).unwrap();
+        for _ in 0..10 {
+            cx += 4.0;
+            b = look.step(&frame(w, h, cx, cy, r), b).expect("seen").0;
+        }
+        let last = b;
+        let mut guess = b;
+        let hidden = frame(w, h, -100.0, -100.0, 1.0);
+        for missed in 0..8 {
+            cx += 4.0;
+            guess = look.predict(guess);
+            let f = look.find_again(&hidden, last, guess, missed);
+            assert!(f.is_none(), "nothing to find while hidden: {f:?}");
+        }
+        cx += 4.0;
+        guess = look.predict(guess);
+        let (nb, _) = look.find_again(&frame(w, h, cx, cy, r), last, guess, 8).expect("found again");
+        assert!((nb.cx - cx).abs() < 3.0 && (nb.cy - cy).abs() < 3.0, "{nb:?} vs ({cx}, {cy})");
+        // and it keeps going
+        cx += 4.0;
+        let (nb, _) = look.step(&frame(w, h, cx, cy, r), nb).expect("kept");
+        assert!((nb.cx - cx).abs() < 3.0, "{nb:?} vs {cx}");
+    }
+
+    #[test]
     fn says_lost_when_the_object_is_gone() {
         let (w, h) = (200, 120);
         let g0 = frame(w, h, 60.0, 60.0, 12.0);
@@ -229,6 +374,10 @@ mod tests {
             LookBox { cx: 1e30, cy: 1e30, w: 1e30, h: 1e30 },
         ] {
             let _ = Look::new(&g, b).and_then(|mut l| l.step(&g, b));
+            if let Some(mut l) = Look::new(&g, LookBox { cx: 32.0, cy: 32.0, w: 20.0, h: 20.0 }) {
+                let _ = l.find_again(&g, b, b, usize::MAX);
+                let _ = l.find_again(&g, b, l.predict(b), 3);
+            }
         }
         // a flat picture has no look
         let flat = Prepared::new(Gray::new(32, 32, vec![0.5; 32 * 32]));
