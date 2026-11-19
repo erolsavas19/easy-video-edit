@@ -33,6 +33,7 @@ pub mod remix;
 pub mod scene;
 mod stretch;
 pub mod track;
+pub mod track_look;
 pub mod transitions;
 pub mod vfx;
 

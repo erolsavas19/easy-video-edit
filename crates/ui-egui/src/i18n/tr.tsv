@@ -3914,3 +3914,12 @@
 	{effect} added	{effect} eklendi
 	Follow · Star	Takip · Yıldız
 	Note	Nota
+	Position & Scale	Konum ve Ölçek
+	Mark Another Object	Başka Nesne İşaretle
+	This object keeps its tracking; mark the next one (another face, another car)	Bu nesnenin takibi korunur; sıradakini işaretleyin (başka bir yüz, başka bir araç)
+	The object was lost (hidden, too small or blurred).	Nesne kaybedildi (gizlendi, çok küçüldü ya da bulanıklaştı).
+	Go to the Last Tracked Frame	Son Takip Edilen Kareye Git
+	If the box slips or stops (behind a tree, say): move the playhead to where the object is seen again, drag the box back onto it and press Track Forward. Tracking goes on from there.	Kutu kayarsa ya da takip durursa (örneğin bir ağacın arkasında): oynatma çizgisini nesnenin yeniden göründüğü yere getirin, kutuyu nesnenin üzerine sürükleyin ve İleri Takip'e basın. Takip oradan devam eder.
+	Tracked objects on this clip	Bu klipte takip edilen nesneler
+	Marked object	İşaretli nesne
+	{n} frames	{n} kare

@@ -95,6 +95,9 @@ pub struct TrackPanel {
     pub body_color: u8,
 }
 
+/// Share of the box (round its middle) the tracker looks in.
+const TRACK_CORE: f64 = 0.8;
+
 /// Frames between the model's results for each quality.
 const QUALITY_STEP: [u64; 3] = [10, 5, 2];
 
@@ -126,6 +129,15 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         && target_state(app, tg).is_none()
     {
         app.ui.kurgu.track = TrackPanel { action: app.ui.kurgu.track.action, ..Default::default() };
+    }
+    // another clip selected: start fresh there (the earlier box and its effect stay)
+    if let Some((clip, _, _)) = app.ui.kurgu.track.target
+        && let Some((sel, _, _)) = selected_video(app)
+        && sel.0 != clip
+        && !job_running(app, app.ui.kurgu.track.job)
+        && !job_running(app, app.ui.kurgu.track.cut_job)
+    {
+        app.ui.kurgu.track = fresh(&app.ui.kurgu.track);
     }
     let running = app
         .ui
@@ -217,6 +229,11 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             });
         }
 
+        // the objects already tracked on this clip
+        if let Some((clip, _, _)) = &video {
+            tracked_list(app, ui, &t, clip.0);
+        }
+
         // 3. mark the object
         step(ui, &t, "3", tl!("Mark the object"));
         match app.ui.kurgu.track.target {
@@ -238,9 +255,11 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     tl!("Drag the box onto the object in the preview; drag its corners to fit it. Move the playhead to where the object is clearly seen."),
                 );
                 ui.horizontal(|ui| {
-                    if small_button(ui, &t, tl!("Start Over"), "kurgu.tracking.reset").clicked() {
-                        // the box and what follows it stay; the panel starts a new one
-                        app.ui.kurgu.track = TrackPanel { action: app.ui.kurgu.track.action, ..Default::default() };
+                    if small_button(ui, &t, tl!("Mark Another Object"), "kurgu.tracking.reset")
+                        .on_hover_text(tl!("This object keeps its tracking; mark the next one (another face, another car)"))
+                        .clicked()
+                    {
+                        app.ui.kurgu.track = fresh(&app.ui.kurgu.track);
                     }
                     if small_button(ui, &t, tl!("Remove Tracking"), "kurgu.tracking.remove")
                         .on_hover_text(tl!("Removes the box, its effect and the attached title"))
@@ -280,6 +299,19 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                     && n > 0
                 {
                     ui.label(egui::RichText::new(tlf!("✔ Tracked over {n} frames", n = n)).size(12.0).color(t.accent));
+                }
+                if target.is_some() && job_error(app, app.ui.kurgu.track.job).is_some() {
+                    ui.label(egui::RichText::new(tl!("The object was lost (hidden, too small or blurred).")).size(11.5).color(t.danger));
+                }
+                if target.is_some_and(|tg| target_state(app, tg).unwrap_or(0) > 1) {
+                    if small_button(ui, &t, tl!("Go to the Last Tracked Frame"), "kurgu.tracking.last").clicked() {
+                        go_to_last_key(app);
+                    }
+                    hint(
+                        ui,
+                        &t,
+                        tl!("If the box slips or stops (behind a tree, say): move the playhead to where the object is seen again, drag the box back onto it and press Track Forward. Tracking goes on from there."),
+                    );
                 }
             }
         }
@@ -540,10 +572,10 @@ fn mark(app: &mut FilmcraftApp, clip: filmcraft_project::ClipId, size: (u32, u32
             .execute("masks.add", json!({"clip": clip.0, "effect": ei, "shape": "rectangle", "center": [w / 2.0, h / 2.0], "size": [w * 0.22, h * 0.22]}))
             .map_err(|e| e.to_string())?;
         let mi = m["mask"].as_u64().map_or(0, |v| v as usize);
-        // a background cut-out follows the box's place only: a turning box drifts off the object
-        let method = if action == Action::Background { "position" } else { "positionRotation" };
+        // place and size, no turning: the box grows as the object comes closer and shrinks as it
+        // goes away, and a turning box drifts off a low-detail object
         app.session
-            .execute("masks.set", json!({"clip": clip.0, "effect": ei, "mask": mi, "feather": 4.0, "trackMethod": method}))
+            .execute("masks.set", json!({"clip": clip.0, "effect": ei, "mask": mi, "feather": 4.0, "trackMethod": "positionScale"}))
             .map_err(|e| e.to_string())?;
         Ok((ei, mi))
     })();
@@ -589,7 +621,8 @@ fn remove(app: &mut FilmcraftApp) {
 
 fn track(app: &mut FilmcraftApp, direction: &str) {
     let Some((clip, effect, mask)) = app.ui.kurgu.track.target else { return };
-    match app.session.execute("masks.track", json!({"clip": clip, "effect": effect, "mask": mask, "direction": direction})) {
+    // by look: follows plain, low-detail objects too (a black dog) and resizes the box with them
+    match app.session.execute("masks.track", json!({"clip": clip, "effect": effect, "mask": mask, "direction": direction, "core": TRACK_CORE, "by": "look"})) {
         Ok(r) => app.ui.kurgu.track.job = r["job"].as_u64(),
         Err(e) => app.ui.status = e.to_string(),
     }
@@ -751,4 +784,109 @@ fn apply_body(app: &mut FilmcraftApp, b: &Body, clip: u64, oi: usize, mi: usize)
         }
         Err(e) => app.ui.status = e,
     }
+}
+
+/// A fresh panel that keeps the user's choices.
+fn fresh(st: &TrackPanel) -> TrackPanel {
+    TrackPanel { action: st.action, quality: st.quality, body_color: st.body_color, model: st.model, ..Default::default() }
+}
+
+/// Whether job `id` is still running.
+fn job_running(app: &FilmcraftApp, id: Option<u64>) -> bool {
+    id.and_then(|id| app.session.jobs.iter().find(|j| j.id == id)).is_some_and(|j| !j.progress.finished.load(std::sync::atomic::Ordering::Relaxed))
+}
+
+/// The error a finished job ended with.
+fn job_error(app: &FilmcraftApp, id: Option<u64>) -> Option<String> {
+    let j = id.and_then(|id| app.session.jobs.iter().find(|j| j.id == id))?;
+    match j.result.lock().map(|r| r.clone()) {
+        Ok(Some(Err(e))) => Some(e),
+        _ => None,
+    }
+}
+
+/// The boxes tracked on `clip`: (effect index, mask index, the action they belong to, tracked frames).
+fn tracked_objects(app: &FilmcraftApp, clip: u64) -> Vec<(usize, usize, Option<Action>, usize)> {
+    let Some((_, it)) = app.session.active_sequence().and_then(|q| q.find_item(filmcraft_project::ClipId(clip))) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (ei, e) in it.effects.iter().enumerate() {
+        let action = match e.effect.as_str() {
+            "mosaic" => Some(Action::Mosaic),
+            "gaussian_blur" if e.params.get("blurriness").and_then(|p| p.value.as_f64()).unwrap_or(0.0) > 0.0 => Some(Action::Blur),
+            // a box that only marks the object (a title, an arrow or a cut-out follows it)
+            "gaussian_blur" => None,
+            _ => continue,
+        };
+        for (mi, m) in e.masks.iter().enumerate() {
+            let n = m.path.keyframes.len();
+            if n > 1 {
+                out.push((ei, mi, action, n));
+            }
+        }
+    }
+    out
+}
+
+/// The tracked objects of the selected clip, each with Select and Remove.
+fn tracked_list(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, clip: u64) {
+    let list = tracked_objects(app, clip);
+    if list.is_empty() || job_running(app, app.ui.kurgu.track.job) {
+        return;
+    }
+    ui.label(egui::RichText::new(tl!("Tracked objects on this clip")).size(12.0).strong().color(t.text));
+    let mut remove_at = None;
+    for (k, (ei, mi, action, n)) in list.iter().enumerate() {
+        let current = app.ui.kurgu.track.target == Some((clip, *ei, *mi));
+        ui.horizontal(|ui| {
+            let what = action.map_or(tl!("Marked object"), Action::label);
+            let text = format!("{}. {} · {}", k + 1, what, tlf!("{n} frames", n = n));
+            ui.label(egui::RichText::new(text).size(11.5).color(if current { t.accent } else { t.text }));
+            if !current && small_button(ui, t, tl!("Select"), "kurgu.tracking.pick").clicked() {
+                let mut st = fresh(&app.ui.kurgu.track);
+                if let Some(a) = action {
+                    st.action = a.index();
+                }
+                st.target = Some((clip, *ei, *mi));
+                app.ui.kurgu.track = st;
+            }
+            if small_button(ui, t, tl!("Remove"), "kurgu.tracking.drop").clicked() {
+                remove_at = Some(*ei);
+            }
+        });
+    }
+    let Some(ei) = remove_at else { return };
+    if app.ui.kurgu.track.target.is_some_and(|(c, e, _)| c == clip && e == ei) {
+        remove(app);
+        return;
+    }
+    match app.session.execute("effects.remove", json!({"clip": clip, "index": ei})) {
+        Ok(_) => {
+            // the effects after it move up one place
+            if let Some((c, e, m)) = app.ui.kurgu.track.target
+                && c == clip
+                && e > ei
+            {
+                app.ui.kurgu.track.target = Some((c, e - 1, m));
+            }
+        }
+        Err(e) => app.ui.status = e.to_string(),
+    }
+}
+
+/// Moves the playhead to the box's latest tracked frame (where Track Forward stopped).
+fn go_to_last_key(app: &mut FilmcraftApp) {
+    let Some((clip, effect, mask)) = app.ui.kurgu.track.target else { return };
+    let Some((_, it)) = app.session.active_sequence().and_then(|q| q.find_item(filmcraft_project::ClipId(clip))) else { return };
+    let Some(last) = it.effects.get(effect).and_then(|e| e.masks.get(mask)).and_then(|m| m.path.keyframes.iter().map(|k| k.time).max()) else {
+        return;
+    };
+    // media time → timeline time
+    let rel = last.0.saturating_sub(it.source_in.0) as f64 / it.speed.abs().max(1e-9);
+    if !rel.is_finite() || it.duration.0 <= 0 {
+        return;
+    }
+    let t = filmcraft_time::Tick(it.start.0.saturating_add(rel.round() as i64)).clamp(it.start, it.end() - filmcraft_time::Tick(1));
+    app.session.set_playhead(t);
 }

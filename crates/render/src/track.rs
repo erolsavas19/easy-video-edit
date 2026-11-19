@@ -298,6 +298,13 @@ pub fn fit_ls(method: TrackMethod, src: &[Vec2], dst: &[Vec2]) -> Option<Affine>
         return None;
     }
     let (mut a, mut b) = (sa / ss, sb / ss);
+    if method == TrackMethod::PositionScale {
+        // no turning: the best uniform scale alone
+        if !a.is_finite() || a <= 1e-6 {
+            return None;
+        }
+        b = 0.0;
+    }
     if method == TrackMethod::PositionRotation {
         let l = (a * a + b * b).sqrt();
         if l < 1e-12 {
@@ -398,6 +405,15 @@ impl Prepared {
     }
     pub fn base(&self) -> &Gray {
         &self.levels[0]
+    }
+    /// Pyramid level `i` (0 = full size, each next one half the size), clamped to the smallest.
+    pub fn level(&self, i: usize) -> &Gray {
+        let last = self.levels.len().saturating_sub(1);
+        &self.levels[i.min(last)]
+    }
+    /// How many pyramid levels there are.
+    pub fn level_count(&self) -> usize {
+        self.levels.len()
     }
 }
 
@@ -506,6 +522,17 @@ mod tests {
     fn tracks_similarity() {
         let e = run(TrackMethod::PositionScaleRotation, -1.5, 0.012, 10);
         assert!(e < 0.75, "max drift {e} px");
+    }
+
+    #[test]
+    fn tracks_scale_without_turning() {
+        // an object coming closer: the box grows with it and stays upright
+        let e = run(TrackMethod::PositionScale, 0.0, 0.015, 10);
+        assert!(e < 1.0, "error {e}");
+        let src = [Vec2::new(0.0, 0.0), Vec2::new(10.0, 0.0), Vec2::new(0.0, 10.0)];
+        let dst: Vec<Vec2> = src.iter().map(|p| *p * 1.5 + Vec2::new(3.0, 4.0)).collect();
+        let m = fit_ls(TrackMethod::PositionScale, &src, &dst).unwrap();
+        assert!((m.a - 1.5).abs() < 1e-9 && m.b.abs() < 1e-12, "{m:?}");
     }
 
     #[test]

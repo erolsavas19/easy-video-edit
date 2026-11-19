@@ -646,3 +646,33 @@ fn a_sticker_orbits_a_tracked_mask() {
     // phase 0: one radius to the right of the mask's middle
     assert!((p0.x - c.x - 50.0).abs() < 2.0 && (p0.y - c.y).abs() < 2.0, "{p0:?} vs {c:?}");
 }
+
+#[test]
+fn tracking_in_the_middle_of_the_mask_with_place_and_scale() {
+    let (mut s, _) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    s.set_playhead(rate.tick_of(10));
+    let c = truth(10.0).apply(filmcraft_geom::Vec2::ZERO);
+    s.execute("masks.add", json!({"effect": "opacity", "shape": "rectangle", "center": [c.x, c.y], "size": [90, 90]})).unwrap();
+    for bad in [json!(0.1), json!(1.5), json!("half")] {
+        assert!(s.execute("masks.track", json!({"core": bad, "wait": true})).is_err(), "core {bad}");
+    }
+    s.execute("masks.set", json!({"trackMethod": "positionScale"})).unwrap();
+    assert_eq!(s.execute("masks.list", json!({})).unwrap()["masks"][0]["trackMethod"], "Position & Scale");
+    let r = s.execute("masks.track", json!({"direction": "forward", "frames": 8, "core": 0.8, "wait": true})).unwrap();
+    assert_eq!(r["frames"], 8, "{r}");
+    let l = s.execute("masks.list", json!({})).unwrap();
+    assert_eq!(l["masks"][0]["pathKeyframes"].as_array().map(Vec::len), Some(9), "{l}");
+    // by look: the box rides on the moving disc
+    assert!(s.execute("masks.track", json!({"by": "smell", "wait": true})).is_err());
+    let r = s.execute("masks.track", json!({"direction": "forward", "frames": 8, "by": "look", "wait": true})).unwrap();
+    assert_eq!(r["frames"], 8, "{r}");
+    let mid_at = |s: &mut Session, f: i64| {
+        let m = s.execute("masks.list", json!({"time": rate.tick_of(f).0})).unwrap();
+        let path = crate::masks::path_from_json(&m["masks"][0]["path"]).unwrap();
+        path.vertices.iter().fold(filmcraft_geom::Vec2::ZERO, |a, v| a + v.p) * (1.0 / path.vertices.len().max(1) as f64)
+    };
+    let mid = mid_at(&mut s, 18);
+    let want = truth(18.0).apply(filmcraft_geom::Vec2::ZERO);
+    assert!((mid - want).length() < 6.0, "box centre {mid:?} vs disc {want:?}");
+}

@@ -45,7 +45,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         spec(
             "masks.set",
             "Change Mask",
-            r#"{"clip":id?,"effect":index|id?,"mask":n?,"name":str?,"inverted":bool?,"mode":"none|add|subtract|intersect|lighten|darken|difference"?,"trackMethod":"position|positionRotation|positionScaleRotation"?,"feather":px?,"opacity":pct?,"expansion":px?,"path":path?,"time":ticks?,"merge":key?}"#,
+            r#"{"clip":id?,"effect":index|id?,"mask":n?,"name":str?,"inverted":bool?,"mode":"none|add|subtract|intersect|lighten|darken|difference"?,"trackMethod":"position|positionScale|positionRotation|positionScaleRotation"?,"feather":px?,"opacity":pct?,"expansion":px?,"path":path?,"time":ticks?,"merge":key?}"#,
             set,
         ),
         spec(
@@ -60,7 +60,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         spec(
             "masks.track",
             "Track Selected Mask",
-            r#"{"clip":id?,"effect":index|id?,"mask":n?,"direction":"forward"|"backward"?,"frames":n?,"method":"position|positionRotation|positionScaleRotation"?,"wait":bool?}"#,
+            r#"{"clip":id?,"effect":index|id?,"mask":n?,"direction":"forward"|"backward"?,"frames":n?,"method":"position|positionScale|positionRotation|positionScaleRotation"?,"core":0.3-1?,"by":"detail"|"look"?,"wait":bool?}"#,
             track,
         ),
         spec(
@@ -646,6 +646,19 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
         Some(m) => TrackMethod::from_name(m).ok_or_else(|| bad("masks.track", format!("unknown method `{m}`")))?,
         None => mask.track_method,
     };
+    // `core`: look for detail only in this share of the mask round its middle (its edges often
+    // hold the background, which pulls the mask off a small object)
+    let core = match p.get("core") {
+        None | Some(Value::Null) => 1.0,
+        Some(v) => v.as_f64().filter(|c| (0.3..=1.0).contains(c)).ok_or_else(|| bad("masks.track", "`core` is a number from 0.3 to 1"))?,
+    };
+    // `by`: "detail" (FilmCraft's feature tracker, the default) or "look" (Easy Video Edit:
+    // template matching with a size search, for objects with little detail, such as a black dog)
+    let by_look = match str_p(p, "by").unwrap_or("detail") {
+        "detail" => false,
+        "look" => true,
+        x => return Err(bad("masks.track", format!("by `{x}`: detail or look"))),
+    };
     let backward = match str_p(p, "direction").unwrap_or("forward") {
         "forward" => false,
         "backward" => true,
@@ -685,6 +698,7 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
             Some((filmcraft_render::track::Prepared::new(g), f.width as f64 / size.0.max(1) as f64))
         };
         let mut path = start_path;
+        let mut look: Option<filmcraft_render::track_look::Look> = None;
         let mut err: Option<String> = None;
         let mut done = 0u64;
         match gray(mt0) {
@@ -701,7 +715,54 @@ fn track(s: &mut Session, p: &Value) -> Result<Value> {
                         err = Some(format!("can't decode frame {step}"));
                         break;
                     };
-                    let region: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
+                    if by_look {
+                        // the box round the mask, in frame pixels
+                        let pts: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
+                        let (mut lo, mut hi) = (Vec2::new(f64::MAX, f64::MAX), Vec2::new(f64::MIN, f64::MIN));
+                        for q in &pts {
+                            lo = Vec2::new(lo.x.min(q.x), lo.y.min(q.y));
+                            hi = Vec2::new(hi.x.max(q.x), hi.y.max(q.y));
+                        }
+                        let bx = filmcraft_render::track_look::LookBox {
+                            cx: ((lo.x + hi.x) / 2.0) as f32,
+                            cy: ((lo.y + hi.y) / 2.0) as f32,
+                            w: (hi.x - lo.x) as f32,
+                            h: (hi.y - lo.y) as f32,
+                        };
+                        if look.is_none() {
+                            look = filmcraft_render::track_look::Look::new(&prev, bx);
+                        }
+                        let found = look.as_mut().and_then(|l| l.step(&next, bx));
+                        let Some((nb, score)) = found else {
+                            err = Some(format!("lost track after {} frame(s): the object is no longer seen", step - 1));
+                            break;
+                        };
+                        let s = f64::from(nb.w / bx.w.max(1e-3));
+                        if !s.is_finite() || s <= 0.0 {
+                            err = Some(format!("lost track after {} frame(s)", step - 1));
+                            break;
+                        }
+                        // scale about the old centre, then move to the new one (frame pixels)
+                        let st = Affine::translate(f64::from(nb.cx), f64::from(nb.cy))
+                            .then_apply(&Affine::scale(s, s))
+                            .then_apply(&Affine::translate(-f64::from(bx.cx), -f64::from(bx.cy)));
+                        let m = Affine::scale(1.0 / k, 1.0 / k).then_apply(&st).then_apply(&Affine::scale(k_prev, k_prev));
+                        path = path.transformed(&m);
+                        lock(&out).push((t, path.clone()));
+                        done += 1;
+                        prog.done.store(done, Ordering::Relaxed);
+                        *lock(&prog.status) = format!("Frame {step} of {steps} · match {:.0} %", score * 100.0);
+                        prev = next;
+                        k_prev = k;
+                        continue;
+                    }
+                    let mut region: Vec<Vec2> = path.flatten(0.5).into_iter().map(|q| q * k_prev).collect();
+                    if core < 1.0 && !region.is_empty() {
+                        let mid = region.iter().fold(Vec2::ZERO, |a, q| a + *q) * (1.0 / region.len() as f64);
+                        for q in &mut region {
+                            *q = mid + (*q - mid) * core;
+                        }
+                    }
                     let Some(st) = filmcraft_render::track::track_step(&prev, &next, &region, method) else {
                         err = Some(format!("lost track after {} frame(s): not enough detail inside the mask", step - 1));
                         break;

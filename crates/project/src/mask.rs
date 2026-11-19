@@ -352,15 +352,19 @@ pub enum TrackMethod {
     PositionRotation,
     #[default]
     PositionScaleRotation,
+    /// Easy Video Edit: place and size without turning (a face or a car coming closer); a box
+    /// that may turn drifts off a low-detail object.
+    PositionScale,
 }
 
 impl TrackMethod {
-    pub const ALL: [TrackMethod; 3] = [TrackMethod::Position, TrackMethod::PositionRotation, TrackMethod::PositionScaleRotation];
+    pub const ALL: [TrackMethod; 4] = [TrackMethod::Position, TrackMethod::PositionScale, TrackMethod::PositionRotation, TrackMethod::PositionScaleRotation];
     pub fn label(self) -> &'static str {
         match self {
             TrackMethod::Position => "Position",
             TrackMethod::PositionRotation => "Position & Rotation",
             TrackMethod::PositionScaleRotation => "Position, Scale & Rotation",
+            TrackMethod::PositionScale => "Position & Scale",
         }
     }
     pub fn from_name(s: &str) -> Option<Self> {
@@ -368,6 +372,7 @@ impl TrackMethod {
             "position" => Some(TrackMethod::Position),
             "positionrotation" => Some(TrackMethod::PositionRotation),
             "positionscalerotation" => Some(TrackMethod::PositionScaleRotation),
+            "positionscale" => Some(TrackMethod::PositionScale),
             _ => None,
         }
     }
