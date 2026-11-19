@@ -557,6 +557,32 @@ fn a_title_follows_a_tracked_mask() {
     assert!(t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"].keyframes.is_empty());
 }
 
+/// `masks.follow` with a still picture (Arrow · Sticker ▸ My Picture): it follows the mask and,
+/// placed shorter than the tracked span, is lengthened to cover it.
+#[test]
+fn a_picture_follows_a_tracked_mask_and_is_lengthened() {
+    let (mut s, clip) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    s.set_playhead(rate.tick_of(10));
+    let c = truth(10.0).apply(filmcraft_geom::Vec2::ZERO);
+    s.execute("effects.apply", json!({"effect": "gaussian_blur"})).unwrap();
+    s.execute("masks.add", json!({"effect": "gaussian_blur", "shape": "rectangle", "center": [c.x, c.y], "size": [80, 80]})).unwrap();
+    s.execute("masks.track", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "direction": "forward", "frames": 6, "wait": true})).unwrap();
+    let png = std::env::temp_dir().join(format!("filmcraft-follow-picture-{}.png", std::process::id()));
+    image::RgbaImage::from_pixel(40, 40, image::Rgba([250, 200, 20, 255])).save(&png).unwrap();
+    let item = s.execute("file.import", json!({"paths": [png.to_string_lossy()]})).unwrap()["items"][0].as_u64().unwrap();
+    let placed =
+        s.execute("timeline.place", json!({"item": item, "track": "new", "time": rate.tick_of(10).0, "duration": rate.tick_of(2).0, "audio": false})).unwrap();
+    let pic = placed["clips"][0].as_u64().unwrap();
+    let r = s.execute("masks.follow", json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": pic})).unwrap();
+    assert_eq!(r["keyframes"], 7, "{r}");
+    let q = s.active_sequence().unwrap();
+    let (_, t) = q.find_item(ClipId(pic)).unwrap();
+    assert!(t.end() > rate.tick_of(16), "lengthened over the tracked span: ends {:?}", t.end());
+    assert_eq!(t.effects.iter().find(|e| e.effect == "motion").unwrap().params["position"].keyframes.len(), 7);
+    let _ = std::fs::remove_file(&png);
+}
+
 /// `masks.cutout` refuses without changing the project when it can't run (no model in this
 /// build, or the model not installed and no download asked for), and `segment.model` describes
 /// the model for the download confirmation.

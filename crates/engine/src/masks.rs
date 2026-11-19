@@ -886,8 +886,8 @@ fn timeline_time_of(it: &filmcraft_project::TrackItem, mt: Tick) -> Tick {
 /// `masks.follow`: makes clip `target` (a title or sticker above the video) follow a tracked mask.
 /// Every Mask Path keyframe becomes a Motion Position keyframe of the target at the same moment:
 /// the middle of the mask (`place` "center", the default) or just above it ("above"), moved by
-/// `offset` (sequence pixels). With `extend` (default true) a graphic target shorter than the
-/// tracked span is lengthened to cover it. One undo step.
+/// `offset` (sequence pixels). With `extend` (default true) a graphic or still-picture target shorter
+/// than the tracked span is lengthened to cover it. One undo step.
 fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "masks.follow";
     let clip = target_clip(s, p)?;
@@ -963,7 +963,12 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     points.sort_by_key(|(t, _)| *t);
     let (first, last) = (points[0].0, points[points.len() - 1].0);
     let (_, tgt) = seq.find_item(target).ok_or_else(|| bad(cmd, "no such target clip"))?;
-    let graphic = matches!(s.project.item(tgt.item).map(|i| &i.kind), Some(filmcraft_project::ItemKind::Graphic { .. }));
+    // a graphic or a still picture (a sticker of the user's own) has no length of its own to keep
+    let graphic = match s.project.item(tgt.item).map(|i| &i.kind) {
+        Some(filmcraft_project::ItemKind::Graphic { .. }) => true,
+        Some(filmcraft_project::ItemKind::Media(m)) => m.info.kind == filmcraft_media::MediaKind::Still,
+        _ => false,
+    };
     let extend = bool_p(p, "extend").unwrap_or(true) && graphic;
     let n = points.len();
     s.edit("Follow Tracked Mask", move |pr, _| {

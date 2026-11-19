@@ -40,7 +40,7 @@ impl Action {
             Action::Mosaic => tl!("Mosaic"),
             Action::Cover => tl!("Text Over It"),
             Action::TextAbove => tl!("Text Above It"),
-            Action::Arrow => tl!("Arrow"),
+            Action::Arrow => tl!("Arrow · Sticker"),
             Action::Background => tl!("Replace Background"),
         }
     }
@@ -93,7 +93,16 @@ pub struct TrackPanel {
     pub model: Option<(bool, bool)>,
     /// The colour chosen for Glow and Neon Edge (index into `BODY_COLORS`).
     pub body_color: u8,
+    /// What Arrow · Sticker attaches (index into `STICKERS`; the last is the user's own picture).
+    pub sticker: u8,
 }
+
+/// Arrow · Sticker: the follow templates to choose from (id after `TRACK_PREFIX`, name), then the
+/// user's own picture (the one selected in Media).
+const STICKERS: [(&str, &str); 6] = [("ok", "Arrow"), ("yildiz", "Star"), ("kalp", "Heart"), ("nota", "Note"), ("parilti", "Sparkle"), ("", "My Picture")];
+
+/// My Picture is placed this wide, as a share of the sequence's width.
+const PICTURE_WIDTH: f64 = 0.12;
 
 /// Share of the box (round its middle) the tracker looks in.
 const TRACK_CORE: f64 = 0.8;
@@ -325,10 +334,50 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         // 5. attach the title or arrow
         if action.follower().is_some() {
             step(ui, &t, "5", tl!("Attach"));
+            if action == Action::Arrow {
+                ui.horizontal_wrapped(|ui| {
+                    for (i, (_, name)) in STICKERS.iter().enumerate() {
+                        let i = u8::try_from(i).unwrap_or(0);
+                        let on = app.ui.kurgu.track.sticker == i;
+                        let r = ui.selectable_label(on, egui::RichText::new(crate::i18n::t(name)).size(11.5));
+                        app.auto.add(&format!("kurgu.tracking.sticker.{i}"), r.rect, crate::i18n::t(name));
+                        if r.clicked() {
+                            app.ui.kurgu.track.sticker = i;
+                        }
+                    }
+                });
+            }
             let tracked = target.and_then(|tg| target_state(app, tg)).unwrap_or(0) > 0 && progress.is_none();
-            let label = if app.ui.kurgu.track.follower.is_some() { tl!("Attach Again") } else { tl!("Attach to the Object") };
-            if big_button(app, ui, &t, label, "kurgu.tracking.attach", tracked, true).clicked() {
-                attach(app, action);
+            let own_picture = action == Action::Arrow && usize::from(app.ui.kurgu.track.sticker) == STICKERS.len() - 1;
+            if own_picture {
+                // the pictures in Media, each attached with one click
+                let mut items: Vec<(filmcraft_project::ItemId, String)> = app
+                    .session
+                    .project
+                    .items
+                    .values()
+                    .filter(|i| matches!(&i.kind, filmcraft_project::ItemKind::Media(m) if m.info.kind == filmcraft_media::MediaKind::Still))
+                    .map(|i| (i.id, i.name.clone()))
+                    .collect();
+                items.sort_by(|a, b| a.1.cmp(&b.1));
+                if items.is_empty() {
+                    hint(ui, &t, tl!("Import a picture in Media first (a PNG with a transparent background looks best)."));
+                }
+                for (k, (id, name)) in items.into_iter().enumerate() {
+                    ui.horizontal(|ui| {
+                        let r = ui.add_enabled(tracked, egui::Button::new(egui::RichText::new(tl!("Attach")).size(11.5)).corner_radius(6));
+                        app.auto.add(&format!("kurgu.tracking.picture.{k}"), r.rect, tl!("Attach"));
+                        ui.label(egui::RichText::new(name).size(12.0).color(t.text));
+                        if r.clicked() {
+                            attach(app, action, Some(id));
+                        }
+                    });
+                }
+            } else {
+                let label = if app.ui.kurgu.track.follower.is_some() { tl!("Attach Again") } else { tl!("Attach to the Object") };
+                if big_button(app, ui, &t, label, "kurgu.tracking.attach", tracked, true).clicked() {
+                    attach(app, action, None);
+                }
             }
             hint(
                 ui,
@@ -630,7 +679,7 @@ fn track(app: &mut FilmcraftApp, direction: &str) {
 
 /// Places the action's title at the start of the tracked span, on its own layer, and makes it
 /// follow the box.
-fn attach(app: &mut FilmcraftApp, action: Action) {
+fn attach(app: &mut FilmcraftApp, action: Action, picture: Option<filmcraft_project::ItemId>) {
     let (Some((clip, effect, mask)), Some((template, place))) = (app.ui.kurgu.track.target, action.follower()) else { return };
     // the earliest tracked moment, on the timeline
     let start = app.session.active_sequence().and_then(|q| {
@@ -640,17 +689,33 @@ fn attach(app: &mut FilmcraftApp, action: Action) {
         Some(filmcraft_time::Tick(it.start.0.saturating_add(((first.0 - it.source_in.0) as f64 / speed).round() as i64)).max(it.start))
     });
     let Some(start) = start else { return };
+    // Arrow · Sticker: the chosen sticker, or the picture selected in Media
+    let sticker = (action == Action::Arrow).then(|| STICKERS.get(usize::from(app.ui.kurgu.track.sticker)).map_or("ok", |s| s.0));
+    let template = match sticker {
+        Some(id) if !id.is_empty() => format!("{}{id}", filmcraft_project::kurgu_templates::TRACK_PREFIX),
+        _ => template.to_string(),
+    };
     // a title placed before replaces nothing: it stays, and a new one is attached
     let r = (|| -> Result<u64, String> {
-        let placed = app.session.execute("graphics.template.apply", json!({"template": template, "time": start.0})).map_err(|e| e.to_string())?;
-        let title = placed["clip"].as_u64().ok_or_else(|| "no title placed".to_string())?;
+        let title = match picture {
+            Some(item) => place_picture(app, item, start)?,
+            None => {
+                let placed = app.session.execute("graphics.template.apply", json!({"template": template, "time": start.0})).map_err(|e| e.to_string())?;
+                placed["clip"].as_u64().ok_or_else(|| "no title placed".to_string())?
+            }
+        };
         app.session
             .execute("masks.follow", json!({"clip": clip, "effect": effect, "mask": mask, "target": title, "place": place}))
             .map_err(|e| e.to_string())?;
         Ok(title)
     })();
     match r {
-        Ok(title) => app.ui.kurgu.track.follower = Some(title),
+        Ok(title) => {
+            app.ui.kurgu.track.follower = Some(title);
+            // the tracked clip stays selected, so the panel keeps its place (another sticker can
+            // be attached at once)
+            app.session.state.selection = vec![filmcraft_project::ClipId(clip)];
+        }
         Err(e) => app.ui.status = e,
     }
 }
@@ -788,7 +853,7 @@ fn apply_body(app: &mut FilmcraftApp, b: &Body, clip: u64, oi: usize, mi: usize)
 
 /// A fresh panel that keeps the user's choices.
 fn fresh(st: &TrackPanel) -> TrackPanel {
-    TrackPanel { action: st.action, quality: st.quality, body_color: st.body_color, model: st.model, ..Default::default() }
+    TrackPanel { action: st.action, quality: st.quality, body_color: st.body_color, model: st.model, sticker: st.sticker, ..Default::default() }
 }
 
 /// Whether job `id` is still running.
@@ -889,4 +954,21 @@ fn go_to_last_key(app: &mut FilmcraftApp) {
     }
     let t = filmcraft_time::Tick(it.start.0.saturating_add(rel.round() as i64)).clamp(it.start, it.end() - filmcraft_time::Tick(1));
     app.session.set_playhead(t);
+}
+
+/// Arrow · Sticker ▸ My Picture: places picture `item` at `start` on a new top layer, sized to a
+/// small sticker; returns its clip (`masks.follow` then lengthens it over the tracked span).
+fn place_picture(app: &mut FilmcraftApp, item: filmcraft_project::ItemId, start: filmcraft_time::Tick) -> Result<u64, String> {
+    let placed = app
+        .session
+        .execute("timeline.place", json!({"items": [item.0], "track": "new", "time": start.0, "audio": false, "insert": false}))
+        .map_err(|e| e.to_string())?;
+    let clip = placed["clip"].as_u64().or_else(|| placed["clips"].get(0).and_then(serde_json::Value::as_u64)).ok_or_else(|| "no picture placed".to_string())?;
+    let width = filmcraft_render::source_size(&app.session.project, item).map_or(0.0, |(w, _)| f64::from(w));
+    let seq_w = app.session.active_sequence().map_or(0.0, |q| f64::from(q.settings.width));
+    if width > 0.0 && seq_w > 0.0 {
+        let scale = (100.0 * PICTURE_WIDTH * seq_w / width).clamp(1.0, 400.0);
+        app.session.execute("effects.setParam", json!({"clip": clip, "effect": "motion", "param": "scale", "value": scale})).map_err(|e| e.to_string())?;
+    }
+    Ok(clip)
 }

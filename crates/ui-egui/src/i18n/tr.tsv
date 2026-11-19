@@ -3926,3 +3926,6 @@
 	Version {version} · based on FilmCraft {base}	Sürüm {version} · FilmCraft {base} tabanlı
 	A simple video editor built on FilmCraft, a clean-room, pure-Rust video editor of the ArtCraft family.	FilmCraft üzerine kurulu, kolay kullanımlı bir video düzenleyici. FilmCraft, ArtCraft ailesinden, temiz oda prensibiyle saf Rust ile yazılmış bir video düzenleyicidir.
 	Opens the Easy Video Edit download page, which shows the latest version.	Easy Video Edit indirme sayfasını açar; en son sürüm orada görünür.
+	Arrow · Sticker	Ok · Çıkartma
+	My Picture	Kendi Resmim
+	Import a picture in Media first (a PNG with a transparent background looks best).	Önce Medya'ya bir resim aktarın (arka planı saydam bir PNG en iyi görünür).
