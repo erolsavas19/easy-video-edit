@@ -786,6 +786,16 @@ fn cut_out_clip(app: &FilmcraftApp) -> Option<(u64, usize, usize)> {
     (it.effects.get(oi)?.masks.get(mi)?.path.keyframes.len() > 1).then_some((c.0, oi, mi))
 }
 
+/// Whether `clip` is cut out (Replace Background) with something on a lower layer under it: the
+/// teleport then needs no empty frame (the engine's own rule, `effects.teleport`).
+fn over_new_background(app: &FilmcraftApp, clip: u64) -> bool {
+    let Some(seq) = app.session.active_sequence() else { return false };
+    let Some((track, it)) = seq.find_item(filmcraft_project::ClipId(clip)) else { return false };
+    let cut = it.effects.iter().any(|e| e.effect == "opacity" && e.masks.iter().any(|m| m.name == "Cutout"));
+    let Some(ti) = seq.video_tracks.iter().position(|t| t.id == track) else { return false };
+    cut && seq.video_tracks.iter().take(ti).any(|t| t.items.iter().any(|o| o.start < it.end() && it.start < o.end()))
+}
+
 /// Step 7: body effects on the cut-out.
 fn body_steps(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, busy: bool) {
     step(ui, t, "7", tl!("Body effects"));
@@ -1036,16 +1046,20 @@ fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         let ph = app.session.playhead();
         let on_clip = item.as_ref().is_some_and(|it| it.start <= ph && ph < it.end());
 
-        // 2. the empty place
+        // 2. the empty place (not needed when the person is cut out over a new background)
         step(ui, &t, "2", tl!("The empty place"));
-        let plate = app.ui.kurgu.track.plate.filter(|(c, _)| Some(*c) == clip);
-        if let Some((_, h)) = plate {
+        let new_bg = clip.is_some_and(|c| over_new_background(app, c));
+        let plate = app.ui.kurgu.track.plate.filter(|(c, _)| Some(*c) == clip && !new_bg);
+        if new_bg {
+            ui.label(egui::RichText::new(tl!("✔ The person is cut out over a new background: no empty frame is needed.")).size(12.0).color(t.accent));
+        } else if let Some((_, h)) = plate {
             let secs = h as f64 / filmcraft_time::TICKS_PER_SECOND as f64;
             ui.label(egui::RichText::new(tlf!("✔ Empty place: the frame at {s} s of the clip", s = format!("{secs:.1}"))).size(12.0).color(t.accent));
         }
-        if big_button(app, ui, &t, tl!("This Frame Is the Empty Place"), "kurgu.teleport.plate", on_clip, plate.is_none())
-            .on_hover_text(tl!("Move the playhead to a moment where the place is empty, then press the button."))
-            .clicked()
+        if !new_bg
+            && big_button(app, ui, &t, tl!("This Frame Is the Empty Place"), "kurgu.teleport.plate", on_clip, plate.is_none())
+                .on_hover_text(tl!("Move the playhead to a moment where the place is empty, then press the button."))
+                .clicked()
             && let (Some(c), Some(it)) = (clip, &item)
         {
             app.ui.kurgu.track.plate = Some((c, it.moving_source_time_at(ph).0));
@@ -1085,7 +1099,7 @@ fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
 
         // 4. the moment
         step(ui, &t, "4", tl!("The moment"));
-        let ready = on_clip && plate.is_some();
+        let ready = on_clip && (plate.is_some() || new_bg);
         let mut mode = None;
         hint(ui, &t, tl!("Move the playhead to the moment of the teleport."));
         // side by side: both stay in view without scrolling
@@ -1097,11 +1111,11 @@ fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                 mode = Some("in");
             }
         });
-        if let (Some(mode), Some(c), Some((_, h))) = (mode, clip, plate) {
+        if let (Some(mode), Some(c), true) = (mode, clip, ready) {
             let color = BODY_COLORS.get(usize::from(app.ui.kurgu.track.body_color)).map_or("#ffd75a", |c| c.0);
             let r = app.session.execute(
                 "effects.teleport",
-                json!({"clip": c, "time": ph.0, "plate": h, "mode": mode, "seconds": secs, "color": color, "plateName": tl!("empty place"), "lightName": tl!("teleport light")}),
+                json!({"clip": c, "time": ph.0, "plate": plate.map(|(_, h)| h),"mode": mode, "seconds": secs, "color": color, "plateName": tl!("empty place"), "lightName": tl!("teleport light")}),
             );
             match r {
                 Ok(_) => {
