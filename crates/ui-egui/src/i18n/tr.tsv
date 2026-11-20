@@ -3929,3 +3929,26 @@
 	Arrow · Sticker	Ok · Çıkartma
 	My Picture	Kendi Resmim
 	Import a picture in Media first (a PNG with a transparent background looks best).	Önce Medya'ya bir resim aktarın (arka planı saydam bir PNG en iyi görünür).
+	Teleport	Işınlanma
+	Teleport…	Işınlanma…
+	The person vanishes or appears on the spot in a burst of light	Kişi bir ışık patlamasıyla olduğu yerde kaybolur ya da belirir
+	← Object Tracking	← Nesne Takibi
+	The person vanishes or appears on the spot in a burst of light, while the place stays as it was. Film with the camera standing still, with a moment where the place is empty (before the person walks in or after they leave).	Kişi bir ışık patlamasıyla olduğu yerde kaybolur ya da belirir; mekân olduğu gibi kalır. Kamerayı sabit tutarak çekin ve mekânın boş olduğu bir an da olsun (kişi kadraja girmeden önce ya da çıktıktan sonra).
+	The empty place	Boş mekân
+	Move the playhead to a moment where the place is empty, then press the button.	Oynatma çizgisini mekânın boş olduğu bir ana getirin, sonra düğmeye basın.
+	✔ Empty place: the frame at {s} s of the clip	✔ Boş mekân: klibin {s}. saniyesindeki kare
+	This Frame Is the Empty Place	Bu Kare Boş Mekân
+	The playhead is not on the selected clip.	Oynatma çizgisi seçili klibin üstünde değil.
+	Light Effect	Işık Efekti
+	The person is cut out: their shape lights up as they go.	Kişi kesip çıkarılmış: giderken bedeninin şekli parlar.
+	Tip: cut the person out first (Replace Background) and their shape lights up as they go; without it the picture flashes bright.	İpucu: önce kişiyi kesip çıkarırsanız (Arka Planı Değiştir) giderken bedeninin şekli parlar; kesip çıkarmadan görüntü parlayarak geçer.
+	The moment	Işınlanma anı
+	Move the playhead to the moment of the teleport.	Oynatma çizgisini ışınlanma anına getirin.
+	Vanish Here	Burada Kaybolsun
+	Appear Here	Burada Belirsin
+	Teleport added: the person vanishes here	Işınlanma eklendi: kişi burada kayboluyor
+	Teleport added: the person appears here	Işınlanma eklendi: kişi burada beliriyor
+	The empty place and the light go on their own layers; Undo takes the whole teleport back.	Boş mekân ve ışık kendi katmanlarına eklenir; Geri Al tüm ışınlanmayı geri alır.
+	The person vanishes or appears in a burst of light. Film with the camera standing still, with a moment where the place is empty.	Kişi bir ışık patlamasıyla kaybolur ya da belirir. Kamerayı sabit tutarak çekin; mekânın boş olduğu bir an da olsun.
+	empty place	boş mekân
+	teleport light	ışınlanma ışığı

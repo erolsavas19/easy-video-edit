@@ -810,6 +810,16 @@ pub const TOOLS: &[ToolDef] = &[
         soon: false,
         keywords: "body effects glow neon outline portrait blur background color pop spotlight orbit stars hearts vücut efektleri parlama ışıltı neon kenar portre arka planı bulanıklaştır renk vurgusu siyah beyaz spot ışık dönen yıldızlar kalpler",
     },
+    ToolDef {
+        key: "tool:teleport",
+        label: "Teleport",
+        icon: Icon::Sparkle,
+        group: "Background",
+        effect: None,
+        command: None,
+        soon: false,
+        keywords: "teleport vanish appear disappear magic beam ışınlanma ışınla kaybol kaybolma belir belirme yok ol sihir büyü",
+    },
     tool("tool:stabilize", "Stabilize", Icon::Camera, "Picture", "warp_stabilizer", "stabilize stabilizer warp shake sabitle sabitleme titreme sarsıntı"),
     tool("tool:crop", "Crop", Icon::Square, "Picture", "crop", "crop trim edges kırp kenar"),
     tool("tool:fliph", "Flip Horizontal", Icon::Slide, "Picture", "horizontal_flip", "flip mirror horizontal ayna çevir yatay"),
@@ -890,8 +900,13 @@ fn apply_tool(app: &mut FilmcraftApp, ctx: &egui::Context, key: &str) {
     if def.key == "tool:track" {
         // the Tracking tab on the right walks through it
         app.ui.kurgu.right_tab = 2;
+    } else if def.key == "tool:teleport" {
+        // the right side's panel walks through it
+        app.ui.kurgu.track.teleport = true;
+        app.ui.kurgu.right_tab = 2;
     } else if def.key == "tool:bgremove" || def.key == "tool:body" {
         // so does Replace Background, its first choice
+        app.ui.kurgu.track.teleport = false;
         if app.ui.kurgu.track.target.is_none() {
             app.ui.kurgu.track.action = super::takip::BACKGROUND_ACTION;
         }

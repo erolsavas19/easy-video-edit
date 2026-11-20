@@ -59,6 +59,7 @@ pub mod shortcut_presets;
 pub mod shortcuts;
 pub mod source_monitor;
 pub mod sync;
+mod teleport;
 pub mod transcript;
 pub mod trim;
 pub mod voiceover;

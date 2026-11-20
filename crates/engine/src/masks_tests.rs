@@ -702,3 +702,75 @@ fn tracking_in_the_middle_of_the_mask_with_place_and_scale() {
     let want = truth(18.0).apply(filmcraft_geom::Vec2::ZERO);
     assert!((mid - want).length() < 6.0, "box centre {mid:?} vs disc {want:?}");
 }
+
+/// `effects.teleport`: the empty place, held, goes under the clip; the clip fades round the
+/// moment; a cut-out lights up above (else the picture flashes); one undo step; bad requests and a
+/// teleport with no empty frame are refused.
+#[test]
+fn teleport_vanishes_and_appears_over_the_empty_place() {
+    let (mut s, clip) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    let at = rate.tick_of(24);
+    let plate = rate.tick_of(40).0;
+    // no empty frame and no new background: refused
+    assert!(s.execute("effects.teleport", json!({"clip": clip.0, "time": at.0})).is_err());
+    for bad in [
+        json!({"clip": clip.0, "time": at.0, "plate": plate, "mode": "sideways"}),
+        json!({"clip": clip.0, "time": at.0, "plate": plate, "seconds": 9}),
+        json!({"clip": clip.0, "time": at.0, "plate": plate, "seconds": "slow"}),
+        json!({"clip": clip.0, "time": at.0, "plate": plate, "color": "blue"}),
+        json!({"clip": clip.0, "time": at.0, "plate": rate.tick_of(500).0}),
+        json!({"clip": clip.0, "time": rate.tick_of(900).0, "plate": plate}),
+        json!({"clip": 999_999, "time": at.0, "plate": plate}),
+    ] {
+        assert!(s.execute("effects.teleport", bad.clone()).is_err(), "{bad}");
+    }
+    let tracks = s.active_sequence().unwrap().video_tracks.len();
+    // vanish, no cut-out: held frame under, fade out, a bright flash
+    let r = s.execute("effects.teleport", json!({"clip": clip.0, "time": at.0, "plate": plate, "mode": "out", "seconds": 1.0})).unwrap();
+    assert_eq!(r["glow"], false, "{r}");
+    let q = s.active_sequence().unwrap();
+    assert_eq!(q.video_tracks.len(), tracks + 1);
+    let bg = ClipId(r["clips"][0].as_u64().unwrap());
+    let bg_track = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == bg)).unwrap();
+    let clip_track = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == clip)).unwrap();
+    assert!(bg_track < clip_track, "the empty place is under the clip");
+    assert_eq!(q.find_item(bg).unwrap().1.frame_hold, Some(filmcraft_time::Tick(plate)));
+    let (_, it) = q.find_item(clip).unwrap();
+    let keys: Vec<f64> = it.effects.iter().find(|e| e.effect == "opacity").unwrap().params["opacity"]
+        .keyframes
+        .iter()
+        .map(|k| match k.value {
+            filmcraft_project::ParamValue::Float(v) => v,
+            _ => -1.0,
+        })
+        .collect();
+    assert_eq!(keys, vec![100.0, 0.0], "fades out");
+    assert!(it.effects.iter().any(|e| e.effect == "brightness_contrast"), "flashes bright");
+    s.undo();
+    assert_eq!(s.active_sequence().unwrap().video_tracks.len(), tracks, "one undo step");
+    // appear, with a cut-out: the empty place under, a glow of the shape above
+    s.execute("masks.add", json!({"clip": clip.0, "effect": "opacity", "shape": "ellipse", "center": [160, 120], "size": [100, 140]})).unwrap();
+    s.execute("masks.set", json!({"clip": clip.0, "effect": "opacity", "mask": 0, "name": "Cutout"})).unwrap();
+    let r = s.execute("effects.teleport", json!({"clip": clip.0, "time": at.0, "plate": plate, "mode": "in", "color": "#ff8800"})).unwrap();
+    assert_eq!(r["glow"], true, "{r}");
+    let q = s.active_sequence().unwrap();
+    assert_eq!(q.video_tracks.len(), tracks + 2);
+    let glow = ClipId(r["clips"][1].as_u64().unwrap());
+    let glow_track = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == glow)).unwrap();
+    let clip_track = q.video_tracks.iter().position(|t| t.items.iter().any(|i| i.id == clip)).unwrap();
+    assert!(glow_track > clip_track, "the light is above the person");
+    let (_, g) = q.find_item(glow).unwrap();
+    assert!(g.effects.iter().any(|e| e.effect == "tint"));
+    assert_eq!(g.effects.iter().find(|e| e.effect == "opacity").unwrap().params["opacity"].keyframes.len(), 3, "flares up and dies down");
+    let (_, it) = q.find_item(clip).unwrap();
+    let first = &it.effects.iter().find(|e| e.effect == "opacity").unwrap().params["opacity"].keyframes[0];
+    assert!(matches!(first.value, filmcraft_project::ParamValue::Float(v) if v == 0.0), "appears from nothing");
+    s.undo();
+    // a cut-out over a new background already under it: no empty frame needed
+    let item = s.active_sequence().unwrap().find_item(clip).unwrap().1.item;
+    s.execute("sequence.addTracks", json!({"video": 1, "audio": 0, "videoAfter": "first"})).unwrap();
+    s.execute("timeline.place", json!({"item": item.0, "track": "V1", "time": 0, "audio": false, "insert": false})).unwrap();
+    let r = s.execute("effects.teleport", json!({"clip": clip.0, "time": at.0, "mode": "out"})).unwrap();
+    assert_eq!(r["clips"].as_array().map(Vec::len), Some(1), "only the light: {r}");
+}

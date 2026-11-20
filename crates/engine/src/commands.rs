@@ -4219,6 +4219,7 @@ fn build() -> Vec<CommandSpec> {
     v.extend(crate::project_manager::commands());
     v.extend(crate::masks::commands());
     v.extend(crate::cutout::commands());
+    v.extend(crate::teleport::commands());
     v.extend(crate::presets::commands());
     v.extend(crate::export_tools::commands());
     v.extend(crate::transcript::commands());

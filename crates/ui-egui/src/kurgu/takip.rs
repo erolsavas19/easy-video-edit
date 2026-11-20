@@ -95,6 +95,12 @@ pub struct TrackPanel {
     pub body_color: u8,
     /// What Arrow · Sticker attaches (index into `STICKERS`; the last is the user's own picture).
     pub sticker: u8,
+    /// The panel shows the teleport effect instead of the tracking steps.
+    pub teleport: bool,
+    /// Teleport: the frame with the place empty (clip, media ticks).
+    pub plate: Option<(u64, i64)>,
+    /// Teleport: how long the light lasts, in seconds (0 = the default).
+    pub tp_secs: f32,
 }
 
 /// Arrow · Sticker: the follow templates to choose from (id after `TRACK_PREFIX`, name), then the
@@ -133,6 +139,10 @@ fn target_state(app: &FilmcraftApp, (clip, effect, mask): (u64, usize, usize)) -
 
 pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
     let t = app.tokens;
+    if app.ui.kurgu.track.teleport {
+        teleport_panel(app, ui, rect);
+        return;
+    }
     // forget a box that undo or a deletion took away
     if let Some(tg) = app.ui.kurgu.track.target
         && target_state(app, tg).is_none()
@@ -816,6 +826,12 @@ fn body_steps(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, busy: bool)
         });
     }
     hint(ui, t, tl!("Each effect goes on its own layer; select it in the timeline to change or delete it."));
+    if small_button(ui, t, tl!("Teleport…"), "kurgu.body.teleport")
+        .on_hover_text(tl!("The person vanishes or appears on the spot in a burst of light"))
+        .clicked()
+    {
+        app.ui.kurgu.track.teleport = true;
+    }
 }
 
 fn apply_body(app: &mut FilmcraftApp, b: &Body, clip: u64, oi: usize, mi: usize) {
@@ -853,7 +869,16 @@ fn apply_body(app: &mut FilmcraftApp, b: &Body, clip: u64, oi: usize, mi: usize)
 
 /// A fresh panel that keeps the user's choices.
 fn fresh(st: &TrackPanel) -> TrackPanel {
-    TrackPanel { action: st.action, quality: st.quality, body_color: st.body_color, model: st.model, sticker: st.sticker, ..Default::default() }
+    TrackPanel {
+        action: st.action,
+        quality: st.quality,
+        body_color: st.body_color,
+        model: st.model,
+        sticker: st.sticker,
+        teleport: st.teleport,
+        tp_secs: st.tp_secs,
+        ..Default::default()
+    }
 }
 
 /// Whether job `id` is still running.
@@ -971,4 +996,125 @@ fn place_picture(app: &mut FilmcraftApp, item: filmcraft_project::ItemId, start:
         app.session.execute("effects.setParam", json!({"clip": clip, "effect": "motion", "param": "scale", "value": scale})).map_err(|e| e.to_string())?;
     }
     Ok(clip)
+}
+
+/// The teleport effect: the person vanishes (or appears) on the spot in a burst of light, over a
+/// frame of the same shot with the place empty (`effects.teleport`).
+fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
+    let t = app.tokens;
+    let inner = rect.shrink2(vec2(12.0, 8.0));
+    let mut child = ui.new_child(egui::UiBuilder::new().max_rect(inner).id_salt("kurgu-teleport"));
+    egui::ScrollArea::vertical().id_salt("kurgu-teleport-scroll").auto_shrink([false, false]).show(&mut child, |ui| {
+        ui.set_width(inner.width());
+        ui.spacing_mut().item_spacing.y = 8.0;
+        if small_button(ui, &t, tl!("← Object Tracking"), "kurgu.teleport.back").clicked() {
+            app.ui.kurgu.track.teleport = false;
+        }
+        ui.label(egui::RichText::new(tl!("Teleport")).size(15.0).strong().color(t.text));
+        ui.label(
+            egui::RichText::new(tl!(
+                "The person vanishes or appears in a burst of light. Film with the camera standing still, with a moment where the place is empty."
+            ))
+            .size(11.5)
+            .color(t.text_dim),
+        );
+
+        // 1. the clip
+        step(ui, &t, "1", tl!("Select the video clip in the timeline"));
+        let video = selected_video(app);
+        let clip = match &video {
+            Some((c, name, _)) => {
+                ui.label(egui::RichText::new(format!("✔ {name}")).size(12.0).color(t.accent));
+                Some(c.0)
+            }
+            None => {
+                ui.label(egui::RichText::new(tl!("No video clip selected")).size(12.0).color(t.text_dim));
+                None
+            }
+        };
+        let item = clip.and_then(|c| app.session.active_sequence()?.find_item(filmcraft_project::ClipId(c)).map(|(_, it)| it.clone()));
+        let ph = app.session.playhead();
+        let on_clip = item.as_ref().is_some_and(|it| it.start <= ph && ph < it.end());
+
+        // 2. the empty place
+        step(ui, &t, "2", tl!("The empty place"));
+        let plate = app.ui.kurgu.track.plate.filter(|(c, _)| Some(*c) == clip);
+        if let Some((_, h)) = plate {
+            let secs = h as f64 / filmcraft_time::TICKS_PER_SECOND as f64;
+            ui.label(egui::RichText::new(tlf!("✔ Empty place: the frame at {s} s of the clip", s = format!("{secs:.1}"))).size(12.0).color(t.accent));
+        }
+        if big_button(app, ui, &t, tl!("This Frame Is the Empty Place"), "kurgu.teleport.plate", on_clip, plate.is_none())
+            .on_hover_text(tl!("Move the playhead to a moment where the place is empty, then press the button."))
+            .clicked()
+            && let (Some(c), Some(it)) = (clip, &item)
+        {
+            app.ui.kurgu.track.plate = Some((c, it.moving_source_time_at(ph).0));
+        }
+        if clip.is_some() && !on_clip {
+            hint(ui, &t, tl!("The playhead is not on the selected clip."));
+        }
+
+        // 3. how it looks
+        step(ui, &t, "3", tl!("Light Effect"));
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(tl!("Color")).size(11.5).color(t.text_dim));
+            for (i, (_, c)) in BODY_COLORS.iter().enumerate() {
+                let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                ui.painter().circle_filled(r.center(), 8.0, *c);
+                if usize::from(app.ui.kurgu.track.body_color) == i {
+                    ui.painter().circle_stroke(r.center(), 10.0, Stroke::new(2.0, t.accent));
+                }
+                if resp.clicked() {
+                    app.ui.kurgu.track.body_color = u8::try_from(i).unwrap_or(0);
+                }
+            }
+        });
+        let mut secs = if app.ui.kurgu.track.tp_secs > 0.0 { app.ui.kurgu.track.tp_secs } else { 0.8 };
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(tl!("Duration")).size(11.5).color(t.text_dim));
+            if ui.add(egui::Slider::new(&mut secs, 0.3..=2.0).suffix(" s").step_by(0.1)).changed() {
+                app.ui.kurgu.track.tp_secs = secs;
+            }
+        })
+        .response
+        .on_hover_text(if cut_out_clip(app).is_some_and(|(c, _, _)| Some(c) == clip) {
+            tl!("The person is cut out: their shape lights up as they go.")
+        } else {
+            tl!("Tip: cut the person out first (Replace Background) and their shape lights up as they go; without it the picture flashes bright.")
+        });
+
+        // 4. the moment
+        step(ui, &t, "4", tl!("The moment"));
+        let ready = on_clip && plate.is_some();
+        let mut mode = None;
+        hint(ui, &t, tl!("Move the playhead to the moment of the teleport."));
+        // side by side: both stay in view without scrolling
+        ui.horizontal(|ui| {
+            if big_button(app, ui, &t, tl!("Vanish Here"), "kurgu.teleport.out", ready, true).clicked() {
+                mode = Some("out");
+            }
+            if big_button(app, ui, &t, tl!("Appear Here"), "kurgu.teleport.in", ready, true).clicked() {
+                mode = Some("in");
+            }
+        });
+        if let (Some(mode), Some(c), Some((_, h))) = (mode, clip, plate) {
+            let color = BODY_COLORS.get(usize::from(app.ui.kurgu.track.body_color)).map_or("#ffd75a", |c| c.0);
+            let r = app.session.execute(
+                "effects.teleport",
+                json!({"clip": c, "time": ph.0, "plate": h, "mode": mode, "seconds": secs, "color": color, "plateName": tl!("empty place"), "lightName": tl!("teleport light")}),
+            );
+            match r {
+                Ok(_) => {
+                    app.session.state.selection = vec![filmcraft_project::ClipId(c)];
+                    app.ui.status = if mode == "out" {
+                        tl!("Teleport added: the person vanishes here").to_string()
+                    } else {
+                        tl!("Teleport added: the person appears here").to_string()
+                    };
+                }
+                Err(e) => app.ui.status = e.to_string(),
+            }
+        }
+        hint(ui, &t, tl!("The empty place and the light go on their own layers; Undo takes the whole teleport back."));
+    });
 }
