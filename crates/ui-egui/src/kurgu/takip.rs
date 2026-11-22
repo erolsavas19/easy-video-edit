@@ -19,17 +19,24 @@ enum Action {
     Cover,
     TextAbove,
     Arrow,
+    Replace,
+    /// Cuts the object out for the body effects (and, when it is ready, for Replace Background).
     Background,
 }
 
-const ACTIONS: [Action; 6] = [Action::Background, Action::Blur, Action::Mosaic, Action::Cover, Action::TextAbove, Action::Arrow];
+const ACTIONS: [Action; 7] = [Action::Blur, Action::Mosaic, Action::Replace, Action::Cover, Action::TextAbove, Action::Arrow, Action::Background];
 
-/// The Action index of Replace Background (the Tools card opens the panel on it).
-pub const BACKGROUND_ACTION: u8 = 0;
+/// The Action index of the cut-out and its body effects (the Tools card opens the panel on it).
+pub const BACKGROUND_ACTION: u8 = 6;
+
+/// Replace Background is shown as coming soon: the cut-out does not yet hold a moving object well
+/// enough to put another background behind it (the gaps between legs fill in, and it can jump to
+/// what is behind the object). The body effects, which forgive a rough edge, keep using it.
+pub const BACKGROUND_SOON: bool = true;
 
 impl Action {
     fn from_u8(v: u8) -> Action {
-        ACTIONS.get(usize::from(v)).copied().unwrap_or(Action::Background)
+        ACTIONS.get(usize::from(v)).copied().unwrap_or(Action::Blur)
     }
     fn index(self) -> u8 {
         ACTIONS.iter().position(|a| *a == self).and_then(|i| u8::try_from(i).ok()).unwrap_or(0)
@@ -41,6 +48,8 @@ impl Action {
             Action::Cover => tl!("Text Over It"),
             Action::TextAbove => tl!("Text Above It"),
             Action::Arrow => tl!("Arrow · Sticker"),
+            Action::Replace => tl!("Replace with Media"),
+            Action::Background if BACKGROUND_SOON => tl!("Body Effects"),
             Action::Background => tl!("Replace Background"),
         }
     }
@@ -50,6 +59,8 @@ impl Action {
             Action::Mosaic => Icon::Grid,
             Action::Cover | Action::TextAbove => Icon::Type,
             Action::Arrow => Icon::TrackMaskFwd,
+            Action::Replace => Icon::Image,
+            Action::Background if BACKGROUND_SOON => Icon::Sun,
             Action::Background => Icon::Image,
         }
     }
@@ -101,6 +112,11 @@ pub struct TrackPanel {
     pub plate: Option<(u64, i64)>,
     /// Teleport: how long the light lasts, in seconds (0 = the default).
     pub tp_secs: f32,
+    /// Replace with Media: the whole picture inside the box (else it covers the box), its size in
+    /// percent (0 = 100), and whether what is behind it is blurred.
+    pub inside: bool,
+    pub media_size: f32,
+    pub hide_behind: bool,
 }
 
 /// Arrow · Sticker: the follow templates to choose from (id after `TRACK_PREFIX`, name), then the
@@ -245,6 +261,9 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
                         app.ui.kurgu.track.action = a.index();
                     }
                 }
+                if BACKGROUND_SOON && row.len() < cols {
+                    soon_tile(app, ui, &t, w);
+                }
             });
         }
 
@@ -335,10 +354,15 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
             }
         }
 
-        // 5. Replace Background: cut the object out, then put a picture under it
+        // 5. Body Effects / Replace Background: cut the object out, then what goes round or under it
         let action = Action::from_u8(app.ui.kurgu.track.action);
         if action == Action::Background {
             background_steps(app, ui, &t, target, progress.is_some(), cut_progress, cut_error);
+        }
+
+        // 5. Replace with Media: a picture or video takes the object's place
+        if action == Action::Replace {
+            replace_steps(app, ui, &t, target, progress.is_some());
         }
 
         // 5. attach the title or arrow
@@ -471,6 +495,10 @@ fn background_steps(
         }
     }
 
+    if BACKGROUND_SOON {
+        body_steps(app, ui, t, cut_progress.is_some());
+        return;
+    }
     // 6. the new background
     step(ui, t, "6", tl!("Choose the new background"));
     let done = app.ui.kurgu.track.cut_mask.is_some() && cut_progress.is_none();
@@ -675,7 +703,7 @@ fn remove(app: &mut FilmcraftApp) {
     if let Some(e) = err {
         app.ui.status = e;
     }
-    app.ui.kurgu.track = TrackPanel { action: st.action, quality: st.quality, ..Default::default() };
+    app.ui.kurgu.track = fresh(&st);
 }
 
 fn track(app: &mut FilmcraftApp, direction: &str) {
@@ -798,7 +826,7 @@ fn over_new_background(app: &FilmcraftApp, clip: u64) -> bool {
 
 /// Step 7: body effects on the cut-out.
 fn body_steps(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, busy: bool) {
-    step(ui, t, "7", tl!("Body effects"));
+    step(ui, t, if BACKGROUND_SOON { "6" } else { "7" }, tl!("Body effects"));
     let Some((clip, oi, mi)) = cut_out_clip(app) else {
         hint(ui, t, tl!("Cut the person or object out first; then light, edges and stickers can go round it."));
         return;
@@ -887,6 +915,10 @@ fn fresh(st: &TrackPanel) -> TrackPanel {
         sticker: st.sticker,
         teleport: st.teleport,
         tp_secs: st.tp_secs,
+        inside: st.inside,
+        media_size: st.media_size,
+        // blurring what is behind belongs to one box
+        hide_behind: false,
         ..Default::default()
     }
 }
@@ -946,7 +978,12 @@ fn tracked_list(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, clip: u64
             if !current && small_button(ui, t, tl!("Select"), "kurgu.tracking.pick").clicked() {
                 let mut st = fresh(&app.ui.kurgu.track);
                 if let Some(a) = action {
-                    st.action = a.index();
+                    // a blurred box is also how Replace with Media hides what is behind the picture
+                    if *a == Action::Blur && Action::from_u8(st.action) == Action::Replace {
+                        st.hide_behind = true;
+                    } else {
+                        st.action = a.index();
+                    }
                 }
                 st.target = Some((clip, *ei, *mi));
                 app.ui.kurgu.track = st;
@@ -1094,7 +1131,7 @@ fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         .on_hover_text(if cut_out_clip(app).is_some_and(|(c, _, _)| Some(c) == clip) {
             tl!("The person is cut out: their shape lights up as they go.")
         } else {
-            tl!("Tip: cut the person out first (Replace Background) and their shape lights up as they go; without it the picture flashes bright.")
+            tl!("Tip: cut the person out first (Body Effects) and their shape lights up as they go; without it the picture flashes bright.")
         });
 
         // 4. the moment
@@ -1131,4 +1168,155 @@ fn teleport_panel(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect) {
         }
         hint(ui, &t, tl!("The empty place and the light go on their own layers; Undo takes the whole teleport back."));
     });
+}
+
+/// The place Replace Background will take.
+fn soon_tile(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, width: f32) {
+    let (r, resp) = ui.allocate_exact_size(vec2(width, 54.0), Sense::hover());
+    let p = ui.painter();
+    p.rect_filled(r, CornerRadius::same(8), t.field_bg);
+    icons::paint(p, Rect::from_center_size(pos2(r.center().x, r.min.y + 12.0), vec2(14.0, 14.0)), Icon::Image, t.text_faint);
+    p.text(pos2(r.center().x, r.min.y + 28.0), Align2::CENTER_CENTER, tl!("Replace Background"), Tokens::ui(11.0), t.text_faint);
+    p.text(pos2(r.center().x, r.max.y - 9.0), Align2::CENTER_CENTER, tl!("Soon"), Tokens::ui(10.0), t.accent);
+    app.auto.add("kurgu.tracking.background.soon", r, tl!("Replace Background"));
+    resp.on_hover_text(tl!("Coming soon: separating a moving object from its background is being improved."));
+}
+
+/// `masks.follow`'s `fit` from the panel's choices.
+fn fit_of(st: &TrackPanel) -> serde_json::Value {
+    let size = if st.media_size.is_finite() && st.media_size > 0.0 { st.media_size.clamp(50.0, 250.0) } else { 100.0 };
+    json!({"mode": if st.inside { "contain" } else { "cover" }, "size": f64::from(size)})
+}
+
+/// Step 5 of Replace with Media: how it sits, then the pictures and videos in Media.
+fn replace_steps(app: &mut FilmcraftApp, ui: &mut egui::Ui, t: &Tokens, target: Option<(u64, usize, usize)>, tracking: bool) {
+    step(ui, t, "5", tl!("Choose what takes its place"));
+    let mut refit = false;
+    ui.horizontal_wrapped(|ui| {
+        for (inside, label, auto) in [(false, tl!("Cover the Object"), "kurgu.replace.cover"), (true, tl!("Fit Inside"), "kurgu.replace.inside")] {
+            let r = ui.selectable_label(app.ui.kurgu.track.inside == inside, egui::RichText::new(label).size(11.5));
+            app.auto.add(auto, r.rect, label);
+            if r.clicked() && app.ui.kurgu.track.inside != inside {
+                app.ui.kurgu.track.inside = inside;
+                refit = true;
+            }
+        }
+    });
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(tl!("Size")).size(11.5).color(t.text_dim));
+        let mut size = if app.ui.kurgu.track.media_size > 0.0 { app.ui.kurgu.track.media_size } else { 100.0 };
+        let r = ui.add(egui::Slider::new(&mut size, 50.0..=250.0).suffix("%").fixed_decimals(0));
+        app.auto.add("kurgu.replace.size", r.rect, tl!("Size"));
+        if r.changed() {
+            app.ui.kurgu.track.media_size = size;
+        }
+        // once, when let go: each change is an undo step
+        refit |= r.drag_stopped() || (r.changed() && !r.dragged());
+    });
+    let mut hide = app.ui.kurgu.track.hide_behind;
+    let r = ui.add_enabled(target.is_some(), egui::Checkbox::new(&mut hide, egui::RichText::new(tl!("Blur what shows behind it")).size(11.5)));
+    app.auto.add("kurgu.replace.hide", r.rect, tl!("Blur what shows behind it"));
+    if r.changed()
+        && let Some((clip, effect, mask)) = target
+    {
+        // strong, and soft at the edge: a hard-edged blurred patch shows more than the object did
+        let (amount, feather) = if hide { (90.0, 36.0) } else { (0.0, 4.0) };
+        let set = app
+            .session
+            .execute("effects.setParam", json!({"clip": clip, "effect": effect, "param": "blurriness", "value": amount}))
+            .and_then(|_| app.session.execute("masks.set", json!({"clip": clip, "effect": effect, "mask": mask, "feather": feather})));
+        match set {
+            Ok(_) => app.ui.kurgu.track.hide_behind = hide,
+            Err(e) => app.ui.status = e.to_string(),
+        }
+    }
+    if refit {
+        refit_media(app);
+    }
+
+    let tracked = !tracking && target.and_then(|tg| target_state(app, tg)).unwrap_or(0) > 1;
+    let own = target.and_then(|(clip, _, _)| app.session.active_sequence()?.find_item(filmcraft_project::ClipId(clip)).map(|(_, it)| it.item));
+    let mut items: Vec<(filmcraft_project::ItemId, String)> = app
+        .session
+        .project
+        .items
+        .values()
+        .filter(|i| i.has_video() && Some(i.id) != own && matches!(i.kind, filmcraft_project::ItemKind::Media(_)))
+        .map(|i| (i.id, i.name.clone()))
+        .collect();
+    items.sort_by(|a, b| a.1.cmp(&b.1));
+    if items.is_empty() {
+        hint(ui, t, tl!("Import a picture or video in Media first (a PNG with a transparent background looks best)."));
+    }
+    for (k, (id, name)) in items.into_iter().enumerate() {
+        ui.horizontal(|ui| {
+            let r = ui.add_enabled(tracked, egui::Button::new(egui::RichText::new(tl!("Use")).size(11.5)).corner_radius(6));
+            app.auto.add(&format!("kurgu.replace.media.{k}"), r.rect, tl!("Use"));
+            ui.add(egui::Label::new(egui::RichText::new(name).size(12.0).color(t.text)).truncate());
+            if r.clicked() {
+                replace_with(app, id);
+            }
+        });
+    }
+    let placed =
+        app.ui.kurgu.track.follower.is_some_and(|c| app.session.active_sequence().is_some_and(|q| q.find_item(filmcraft_project::ClipId(c)).is_some()));
+    if placed {
+        ui.label(egui::RichText::new(tl!("✔ It follows the object and grows and shrinks with it")).size(12.0).color(t.accent));
+        hint(ui, t, tl!("If you track further or move the box, press Use again."));
+    } else {
+        hint(ui, t, tl!("Track first; then press Use. The proportions are kept as the object comes nearer or moves away."));
+    }
+}
+
+/// Sizes the media in the object's place again, after a choice changed.
+fn refit_media(app: &mut FilmcraftApp) {
+    let st = &app.ui.kurgu.track;
+    let (Some((clip, effect, mask)), Some(media)) = (st.target, st.follower) else { return };
+    let fit = fit_of(st);
+    if app.session.active_sequence().is_none_or(|q| q.find_item(filmcraft_project::ClipId(media)).is_none()) {
+        return;
+    }
+    if let Err(e) = app.session.execute("masks.follow", json!({"clip": clip, "effect": effect, "mask": mask, "target": media, "fit": fit})) {
+        app.ui.status = e.to_string();
+    }
+}
+
+/// Puts `item` in the tracked object's place on its own layer; it takes the place of the one before.
+fn replace_with(app: &mut FilmcraftApp, item: filmcraft_project::ItemId) {
+    let Some((clip, effect, mask)) = app.ui.kurgu.track.target else { return };
+    let start = app.session.active_sequence().and_then(|q| {
+        let (_, it) = q.find_item(filmcraft_project::ClipId(clip))?;
+        let first = it.effects.get(effect)?.masks.get(mask)?.path.keyframes.iter().map(|k| k.time).min()?;
+        let speed = it.speed.abs().max(1e-9);
+        Some(filmcraft_time::Tick(it.start.0.saturating_add(((first.0 - it.source_in.0) as f64 / speed).round() as i64)).max(it.start))
+    });
+    let Some(start) = start else { return };
+    let fit = fit_of(&app.ui.kurgu.track);
+    let r = (|| -> Result<u64, String> {
+        let placed = app
+            .session
+            .execute("timeline.place", json!({"items": [item.0], "track": "new", "time": start.0, "audio": false, "insert": false}))
+            .map_err(|e| e.to_string())?;
+        let media =
+            placed["clip"].as_u64().or_else(|| placed["clips"].get(0).and_then(serde_json::Value::as_u64)).ok_or_else(|| "no media placed".to_string())?;
+        if let Err(e) = app.session.execute("masks.follow", json!({"clip": clip, "effect": effect, "mask": mask, "target": media, "fit": fit})) {
+            // not left lying full screen over the video
+            let _ = app.session.execute("edit.clear", json!({"clip": media}));
+            return Err(e.to_string());
+        }
+        Ok(media)
+    })();
+    match r {
+        Ok(media) => {
+            if let Some(old) = app.ui.kurgu.track.follower.replace(media)
+                && app.session.active_sequence().is_some_and(|q| q.find_item(filmcraft_project::ClipId(old)).is_some())
+                && let Err(e) = app.session.execute("edit.clear", json!({"clip": old}))
+            {
+                app.ui.status = e.to_string();
+            }
+            // the tracked clip stays selected, so the panel keeps its place
+            app.session.state.selection = vec![filmcraft_project::ClipId(clip)];
+        }
+        Err(e) => app.ui.status = e,
+    }
 }
