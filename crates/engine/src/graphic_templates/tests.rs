@@ -151,13 +151,17 @@ fn builtin_templates_apply_and_thumbnail() {
     for e in s.execute("graphics.template.list", json!({"source": "builtin"})).unwrap().as_array().unwrap().clone() {
         let id = e["id"].as_str().unwrap();
         let r = s.execute("graphics.template.apply", json!({"template": id})).unwrap();
-        assert!(!texts(&s, clip_of(&r)).is_empty(), "{id}");
+        // some are shapes only (screen frames, highlight shapes): those have no text to keep
+        let has_text = super::find_template(&s, id).unwrap().template.layers.iter().any(|l| l.effect == filmcraft_project::graphic::TEXT_LAYER);
+        assert!(!has_text || !texts(&s, clip_of(&r)).is_empty(), "{id}");
         let th = s.execute("graphics.template.thumbnail", json!({"template": id, "width": 160})).unwrap();
         assert_eq!((th["width"].as_u64(), th["height"].as_u64()), (Some(160), Some(90)));
         let png = filmcraft_project::gtemplate::base64_decode(th["pngBase64"].as_str().unwrap()).unwrap();
         assert!(png.starts_with(b"\x89PNG"));
-        let (_, _, rgba) = super::thumbnail(&super::find_template(&s, id).unwrap().template, 160);
-        assert!(rgba.chunks(4).filter(|p| p[3] > 128).count() > 50, "{id}: the thumbnail shows something");
+        // drawn larger than the card (a thin subtitle or a small sticker is a few pixels of 160), and
+        // see-through counts (a highlighter is half transparent)
+        let (_, _, rgba) = super::thumbnail(&super::find_template(&s, id).unwrap().template, 640);
+        assert!(rgba.chunks(4).filter(|p| p[3] > 64).count() > 50, "{id}: the thumbnail shows something");
         s.execute("playhead.set", json!({"seconds": 600 + 20 * s.history.undo.len()})).unwrap();
     }
 }

@@ -3,7 +3,7 @@
 
 /// Easy Video Edit's own version (About window, the download page). FilmCraft's, which it is
 /// built on, stays the crates' version, so FilmCraft's changes merge without touching it.
-pub const VERSION: &str = "1.0.0";
+pub const VERSION: &str = "1.1.0";
 
 /// Where Easy Video Edit is downloaded: Help ▸ Check for Updates opens it.
 pub const DOWNLOAD_PAGE: &str = "https://www.freewaretr.com/app/easyvideoedit";

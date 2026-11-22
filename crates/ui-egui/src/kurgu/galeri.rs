@@ -797,7 +797,7 @@ pub const TOOLS: &[ToolDef] = &[
         group: "Background",
         effect: None,
         command: None,
-        soon: false,
+        soon: super::takip::BACKGROUND_SOON,
         keywords: "background removal remove background person cutout arka plan kaldır arka planı sil kişi seç dekupe yapay zeka",
     },
     ToolDef {
@@ -847,7 +847,7 @@ pub const TOOLS: &[ToolDef] = &[
         effect: None,
         command: None,
         soon: false,
-        keywords: "object tracking motion tracking follow blur plate license plate face nesne takibi takip izle hareket takibi plaka bulanıklaştır yüz gizle",
+        keywords: "object tracking motion tracking follow replace object with media picture nesneyi değiştir medya ile değiştir yerine koy blur plate license plate face nesne takibi takip izle hareket takibi plaka bulanıklaştır yüz gizle",
     },
 ];
 
@@ -905,7 +905,7 @@ fn apply_tool(app: &mut FilmcraftApp, ctx: &egui::Context, key: &str) {
         app.ui.kurgu.track.teleport = true;
         app.ui.kurgu.right_tab = 2;
     } else if def.key == "tool:bgremove" || def.key == "tool:body" {
-        // so does Replace Background, its first choice
+        // so does the cut-out, with the body effects on it
         app.ui.kurgu.track.teleport = false;
         if app.ui.kurgu.track.target.is_none() {
             app.ui.kurgu.track.action = super::takip::BACKGROUND_ACTION;

@@ -774,3 +774,64 @@ fn teleport_vanishes_and_appears_over_the_empty_place() {
     let r = s.execute("effects.teleport", json!({"clip": clip.0, "time": at.0, "mode": "out"})).unwrap();
     assert_eq!(r["clips"].as_array().map(Vec::len), Some(1), "only the light: {r}");
 }
+
+/// `masks.follow` with `fit` (Object Tracking, Replace with Media): the picture takes the box's
+/// place and size at every tracked moment, keeps its proportions, and lasts as long as the tracking.
+#[test]
+fn a_stand_in_grows_with_the_tracked_box() {
+    let (mut s, clip) = tracking_session();
+    let rate = filmcraft_time::FrameRate::FPS_24;
+    s.set_playhead(rate.tick_of(10));
+    let c = truth(10.0).apply(filmcraft_geom::Vec2::ZERO);
+    s.execute("effects.apply", json!({"effect": "gaussian_blur"})).unwrap();
+    s.execute("masks.add", json!({"effect": "gaussian_blur", "shape": "rectangle", "center": [c.x, c.y], "size": [80, 40]})).unwrap();
+    // the box written by hand: it doubles in five frames
+    let (ei, start) = {
+        let q = s.active_sequence().unwrap();
+        let (_, it) = q.find_item(clip).unwrap();
+        (it.effects.iter().position(|e| e.effect == "gaussian_blur").unwrap(), it.start)
+    };
+    let seq = s.state.active_sequence.unwrap();
+    s.edit("keys", |pr, _| {
+        let q = pr.sequence_mut(seq).unwrap();
+        let (_, it) = q.find_item_mut(clip).unwrap();
+        let times: Vec<_> = (0..6).map(|i| it.source_time_at(start + rate.tick_of(10 + i))).collect();
+        let m = &mut it.effects[ei].masks[0];
+        for (i, t) in times.into_iter().enumerate() {
+            let k = 1.0 + i as f64 / 5.0;
+            let corner = |x: f64, y: f64| filmcraft_geom::Vec2::new(c.x + x * 40.0 * k, c.y + y * 20.0 * k);
+            let path = filmcraft_project::MaskPath::polygon(&[corner(-1.0, -1.0), corner(1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)]);
+            m.path.put_keyframe(t, filmcraft_project::ParamValue::Path(path));
+        }
+        Ok(())
+    })
+    .unwrap();
+    let item = s.execute("file.newColorMatte", json!({"seconds": 5})).unwrap()["item"].as_u64().unwrap();
+    let placed = s.execute("timeline.place", json!({"items": [item], "track": "new", "time": (start + rate.tick_of(10)).0, "audio": false})).unwrap();
+    let target = placed["clip"].as_u64().or_else(|| placed["clips"][0].as_u64()).unwrap();
+    let call = |fit: serde_json::Value| json!({"clip": clip.0, "effect": "gaussian_blur", "mask": 0, "target": target, "fit": fit});
+    for hostile in
+        [json!(3), json!({"mode": "stretch"}), json!({"mode": 1}), json!({"size": 0}), json!({"size": -5}), json!({"size": 1e9}), json!({"size": "big"})]
+    {
+        assert!(s.execute("masks.follow", call(hostile.clone())).is_err(), "{hostile}");
+    }
+    let read = |s: &crate::Session| {
+        let (_, t) = s.active_sequence().unwrap().find_item(ClipId(target)).unwrap();
+        let k = &t.effects.iter().find(|e| e.effect == "motion").unwrap().params["scale"].keyframes;
+        let v: Vec<f64> = k.iter().map(|k| k.value.as_f64().unwrap()).collect();
+        (v, t.duration)
+    };
+    s.execute("masks.follow", call(json!({"mode": "cover"}))).unwrap();
+    let (cover, length) = read(&s);
+    assert_eq!(cover.len(), 6);
+    assert!((cover[5] / cover[0] - 2.0).abs() < 0.02, "twice as large: {cover:?}");
+    assert!(cover.windows(2).all(|w| w[1] > w[0]), "{cover:?}");
+    assert!((length.0 - rate.tick_of(6).0).abs() <= rate.frame_duration().0, "trimmed to the tracked span: {length:?}");
+    s.execute("masks.follow", call(json!({"mode": "contain"}))).unwrap();
+    let (contain, _) = read(&s);
+    assert!(contain[0] < cover[0], "inside the box is smaller than covering a box of another shape");
+    s.execute("masks.follow", call(json!({"mode": "cover", "size": 150}))).unwrap();
+    assert!((read(&s).0[0] / cover[0] - 1.5).abs() < 0.01);
+    s.undo();
+    assert!((read(&s).0[0] - contain[0]).abs() < 1e-6, "one undo step");
+}

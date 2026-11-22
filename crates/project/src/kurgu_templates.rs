@@ -13,6 +13,8 @@ use crate::graphic_design::{GraphicMeta, LayerExtra};
 use crate::gtemplate::{ControlKind, GraphicsTemplate, TemplateControl};
 use crate::keyframe::{Interpolation, Keyframe, Param, ParamValue};
 
+mod extras;
+
 /// The interface language is Turkish: templates then carry Turkish sample text (the UI sets it).
 static TURKISH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -324,6 +326,7 @@ pub fn templates() -> Vec<GraphicsTemplate> {
     // the broadcast graphics and stylish titles first: the ones most asked for
     news(&mut v);
     stylish(&mut v);
+    extras::add(&mut v);
     text_effects(&mut v);
     tracking(&mut v);
     titles(&mut v);

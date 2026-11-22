@@ -66,7 +66,7 @@ pub(crate) fn commands() -> Vec<CommandSpec> {
         spec(
             "masks.follow",
             "Follow Tracked Mask",
-            r#"{"clip":id?,"effect":index|id?,"mask":n?,"target":clipId,"place":"center"|"above"|"top"?,"offset":[dx,dy]?,"orbit":{"radius":px,"period":s,"phase":deg}?,"extend":bool?}"#,
+            r#"{"clip":id?,"effect":index|id?,"mask":n?,"target":clipId,"place":"center"|"above"|"top"?,"offset":[dx,dy]?,"orbit":{"radius":px,"period":s,"phase":deg}?,"extend":bool?,"fit":{"mode":"cover"|"contain","size":10-400%?}?}"#,
             follow,
         ),
         spec("masks.toggleVertexSmooth", "Convert Mask Vertex", r#"{"clip":id?,"effect":index|id?,"mask":n?,"vertex":n}"#, toggle_smooth),
@@ -887,7 +887,10 @@ fn timeline_time_of(it: &filmcraft_project::TrackItem, mt: Tick) -> Tick {
 /// Every Mask Path keyframe becomes a Motion Position keyframe of the target at the same moment:
 /// the middle of the mask (`place` "center", the default) or just above it ("above"), moved by
 /// `offset` (sequence pixels). With `extend` (default true) a graphic or still-picture target shorter
-/// than the tracked span is lengthened to cover it. One undo step.
+/// than the tracked span is lengthened to cover it. With `fit` (a picture or video standing in for
+/// the object) the target also grows and shrinks with the mask, its proportions kept (Motion Scale
+/// keyframes: "cover" hides the box, "contain" stays inside it), and it lasts no longer than the
+/// tracked span. One undo step.
 fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     let cmd = "masks.follow";
     let clip = target_clip(s, p)?;
@@ -929,8 +932,13 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
     }
     let src = filmcraft_render::source_size(&s.project, it.item).ok_or_else(|| bad(cmd, "the clip has no picture"))?;
     let par = s.project.source_par(it.item);
-    // (timeline time, position in sequence pixels) for every tracked path
+    let fit = match p.get("fit") {
+        None | Some(Value::Null) => None,
+        Some(f) => Some(Fit::read(f).map_err(|e| bad(cmd, e))?),
+    };
+    // (timeline time, position in sequence pixels) for every tracked path, and the box's size then
     let mut points: Vec<(Tick, Vec2)> = Vec::new();
+    let mut boxes: Vec<(Tick, Vec2)> = Vec::new();
     let t0 = mask.path.keyframes.iter().map(|k| k.time).min().unwrap_or(Tick::ZERO);
     for k in &mask.path.keyframes {
         let ParamValue::Path(path) = &k.value else { continue };
@@ -955,7 +963,9 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
             }
             None => c,
         };
-        points.push((timeline_time_of(it, k.time), Vec2::new(c.x + off.x, c.y + off.y)));
+        let at = timeline_time_of(it, k.time);
+        points.push((at, Vec2::new(c.x + off.x, c.y + off.y)));
+        boxes.push((at, Vec2::new((a.x - b.x).abs(), h)));
     }
     if points.is_empty() {
         return Err(bad(cmd, "the mask is not tracked yet: track it first"));
@@ -970,6 +980,22 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
         _ => false,
     };
     let extend = bool_p(p, "extend").unwrap_or(true) && graphic;
+    let scales = match fit {
+        Some(f) => {
+            if !boxes.iter().any(|(_, b)| b.x >= 1.0 && b.y >= 1.0) {
+                return Err(bad(cmd, "the tracked box has no size"));
+            }
+            let size = s.project.conformed_source_size(tgt.item, seq.settings.par).ok_or_else(|| bad(cmd, "the target has no picture"))?;
+            // Scale to Frame Size already resizes the picture
+            let framed =
+                if tgt.scale_to_frame { (f64::from(seq.settings.width) / size.0.max(1.0)).min(f64::from(seq.settings.height) / size.1.max(1.0)) } else { 1.0 };
+            boxes.sort_by_key(|(t, _)| *t);
+            f.scales(&boxes, size, framed)
+        }
+        None => Vec::new(),
+    };
+    // where a stand-in ends: with the tracked span, or with the tracked clip
+    let trim = fit.map(|_| (last + seq.settings.frame_rate.frame_duration()).min(it.end()));
     let n = points.len();
     s.edit("Follow Tracked Mask", move |pr, _| {
         let q = pr.sequence_mut(seq_id).ok_or(EngineError::NoSequence)?;
@@ -977,6 +1003,13 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
         if extend && t.start <= first && t.end() < last {
             t.duration = last - t.start + Tick(1);
         }
+        if let Some(end) = trim
+            && end > t.start
+            && (t.end() > end || extend)
+        {
+            t.duration = end - t.start;
+        }
+        let scale_keys: Vec<(Tick, f64)> = scales.iter().map(|(tt, v)| (t.effect_time_at(*tt), *v)).collect();
         let keys: Vec<(Tick, Vec2)> = points.iter().map(|(tt, c)| (t.effect_time_at(*tt), *c)).collect();
         let motion = t.effects.iter_mut().find(|e| e.effect == "motion").ok_or_else(|| bad(cmd, "the target has no Motion"))?;
         let pos = motion.params.get_mut("position").ok_or_else(|| bad(cmd, "the target has no Position"))?;
@@ -984,9 +1017,74 @@ fn follow(s: &mut Session, p: &Value) -> Result<Value> {
         for (mt, c) in keys {
             pos.put_keyframe(mt, ParamValue::Vec2(c));
         }
+        if let Some((_, settled)) = scale_keys.first().copied() {
+            // both sides by the same amount, or the picture would be stretched
+            if let Some(uniform) = motion.params.get_mut("uniform_scale") {
+                uniform.keyframes.clear();
+                uniform.value = ParamValue::Bool(true);
+            }
+            let scale = motion.params.get_mut("scale").ok_or_else(|| bad(cmd, "the target has no Scale"))?;
+            scale.keyframes.clear();
+            scale.value = ParamValue::Float(settled);
+            for (mt, v) in scale_keys {
+                scale.put_keyframe(mt, ParamValue::Float(v));
+            }
+        }
         Ok(())
     })?;
     Ok(json!({"target": target.0, "keyframes": n, "from": first.0, "to": last.0}))
+}
+
+/// How a stand-in is sized to the tracked box (`masks.follow` `fit`).
+#[derive(Clone, Copy)]
+struct Fit {
+    cover: bool,
+    /// Share of the fitted size (1 = as fitted).
+    size: f64,
+}
+
+impl Fit {
+    fn read(v: &Value) -> std::result::Result<Fit, &'static str> {
+        if !v.is_object() {
+            return Err("`fit` must be an object");
+        }
+        let cover = match v.get("mode") {
+            None | Some(Value::Null) => true,
+            Some(m) => match m.as_str() {
+                Some("cover") => true,
+                Some("contain") => false,
+                _ => return Err("`fit.mode`: cover or contain"),
+            },
+        };
+        let size = match v.get("size") {
+            None | Some(Value::Null) => 100.0,
+            Some(n) => n.as_f64().filter(|n| (10.0..=400.0).contains(n)).ok_or("`fit.size` must be 10 to 400 (percent)")?,
+        };
+        Ok(Fit { cover, size: size / 100.0 })
+    }
+
+    /// Motion Scale (percent) at each box, for a picture `size` already resized `framed` times.
+    /// Averaged over up to two frames either side, as the tracker's size shivers a little.
+    fn scales(self, boxes: &[(Tick, Vec2)], size: (f64, f64), framed: f64) -> Vec<(Tick, f64)> {
+        let base = if framed.is_finite() && framed > 0.0 { framed } else { 1.0 };
+        let raw: Vec<f64> = boxes
+            .iter()
+            .map(|(_, b)| {
+                let (x, y) = (b.x / size.0.max(1.0), b.y / size.1.max(1.0));
+                let k = if self.cover { x.max(y) } else { x.min(y) };
+                (100.0 * k * self.size / base).clamp(0.1, 10_000.0)
+            })
+            .collect();
+        boxes
+            .iter()
+            .enumerate()
+            .filter_map(|(i, (t, _))| {
+                let reach = i.min(raw.len() - 1 - i).min(2);
+                let around = raw.get(i - reach..=i + reach)?;
+                Some((*t, around.iter().sum::<f64>() / around.len() as f64))
+            })
+            .collect()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {

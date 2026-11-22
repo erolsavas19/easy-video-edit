@@ -380,7 +380,7 @@ fn body_effect(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(cmd, "body effects go on a video clip"));
     }
     if cutout_mask(it).is_none() {
-        return Err(bad(cmd, "the clip has no cut-out: cut the object out first (Replace Background)"));
+        return Err(bad(cmd, "the clip has no cut-out: cut the object out first (Body Effects)"));
     }
     let id = s.edit_sequence("Body Effect", move |q, ctx, _| {
         let ti = q.video_tracks.iter().position(|t| t.id == track).ok_or_else(|| bad(cmd, "the clip's track is gone"))?;

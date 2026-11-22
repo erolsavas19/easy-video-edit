@@ -349,15 +349,12 @@ fn app_creator(launch: Launch, graphics: graphics::GraphicsStart, created: Arc<A
         } else if !startup_flag && session.prefs.general.at_startup == "openMostRecent" {
             // Settings ▸ General ▸ At Startup ▸ Open Most Recent
             let recent = session.prefs.general.recent_projects.iter().find(|p| std::path::Path::new(p).exists()).cloned();
-            match recent {
-                Some(p) => {
-                    if let Err(e) = session.execute("file.open", json!({"path": p})) {
-                        log::error!("{e}");
-                    }
-                }
-                // Easy Video Edit starts with an empty project when there is nothing recent to
-                // open (FilmCraft opens its demo here); the empty Timeline still offers the demo.
-                None => {}
+            // Easy Video Edit starts with an empty project when there is nothing recent to
+            // open (FilmCraft opens its demo here); the empty Timeline still offers the demo.
+            if let Some(p) = recent
+                && let Err(e) = session.execute("file.open", json!({"path": p}))
+            {
+                log::error!("{e}");
             }
         } else if !startup_flag && session.prefs.general.at_startup == "emptyProject" {
         } else if demo && startup_flag {

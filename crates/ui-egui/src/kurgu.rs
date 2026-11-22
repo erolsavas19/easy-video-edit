@@ -399,9 +399,8 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     let timeline = Rect::from_min_max(pos2(rest.min.x, top.max.y + DIVIDER), rest.max);
 
     // Content | preview | properties across the top part.
-    let max_side = (top.width() - 360.0).max(400.0) / 2.0;
-    let content_w = app.ui.kurgu.content_w.clamp(220.0, max_side);
-    let props_w = app.ui.kurgu.props_w.clamp(200.0, max_side);
+    let content_w = side_width(app.ui.kurgu.content_w, 220.0, top.width());
+    let props_w = side_width(app.ui.kurgu.props_w, 200.0, top.width());
     let content = Rect::from_min_max(top.min, pos2(top.min.x + content_w, top.max.y));
     let props = Rect::from_min_max(pos2(top.max.x - props_w, top.min.y), top.max);
     let preview = Rect::from_min_max(pos2(content.max.x + DIVIDER, top.min.y), pos2(props.min.x - DIVIDER, top.max.y));
@@ -444,11 +443,11 @@ pub fn show(app: &mut FilmcraftApp, ui: &mut egui::Ui, body: Rect) {
     // Dividers: content|preview, preview|props, top|timeline.
     let d1 = Rect::from_min_max(pos2(content.max.x, top.min.y), pos2(preview.min.x, top.max.y));
     if let Some(dx) = divider(ui, d1, "kurgu-div-content", false) {
-        app.ui.kurgu.content_w = (content_w + dx).clamp(220.0, max_side);
+        app.ui.kurgu.content_w = side_width(content_w + dx, 220.0, top.width());
     }
     let d2 = Rect::from_min_max(pos2(preview.max.x, top.min.y), pos2(props.min.x, top.max.y));
     if let Some(dx) = divider(ui, d2, "kurgu-div-props", false) {
-        app.ui.kurgu.props_w = (props_w - dx).clamp(200.0, max_side);
+        app.ui.kurgu.props_w = side_width(props_w - dx, 200.0, top.width());
     }
     let d3 = Rect::from_min_max(pos2(rest.min.x, top.max.y), pos2(rest.max.x, timeline.min.y));
     if let Some(dy) = divider(ui, d3, "kurgu-div-timeline", true)
@@ -706,4 +705,31 @@ fn divider(ui: &mut egui::Ui, rect: Rect, id: &str, horizontal: bool) -> Option<
         ui.painter().line_segment([a, b], Stroke::new(3.0, ui.visuals().widgets.hovered.fg_stroke.color));
     }
     resp.dragged().then(|| if horizontal { resp.drag_delta().y } else { resp.drag_delta().x })
+}
+
+/// The width of a side column in `room`: what was asked for, at least `least`, and leaving the
+/// preview its place. A window too narrow for that gives up `least` first. (`clamp` can't be used
+/// here: its bounds cross in a narrow window, and it panics then.)
+fn side_width(wanted: f32, least: f32, room: f32) -> f32 {
+    let most = ((room - 360.0) / 2.0).max(room * 0.3).max(1.0);
+    wanted.max(least).min(most)
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::side_width;
+
+    #[test]
+    fn side_columns_fit_a_window_of_any_width() {
+        for room in [-50.0, 0.0, 1.0, 60.0, 320.0, 640.0, 760.0, 800.0, 1200.0, 1920.0, f32::NAN] {
+            for wanted in [-10.0, 0.0, 300.0, 9000.0, f32::NAN] {
+                let w = side_width(wanted, 220.0, room);
+                assert!(w >= 1.0, "{wanted} in {room}: {w}");
+                if room >= 10.0 {
+                    assert!(2.0 * w < room, "{wanted} in {room} leaves the preview no room: {w}");
+                }
+            }
+        }
+        assert_eq!(side_width(300.0, 220.0, 1920.0), 300.0);
+    }
 }

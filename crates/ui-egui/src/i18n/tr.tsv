@@ -3952,3 +3952,86 @@
 	The person vanishes or appears in a burst of light. Film with the camera standing still, with a moment where the place is empty.	Kişi bir ışık patlamasıyla kaybolur ya da belirir. Kamerayı sabit tutarak çekin; mekânın boş olduğu bir an da olsun.
 	empty place	boş mekân
 	teleport light	ışınlanma ışığı
+	✔ The person is cut out over a new background: no empty frame is needed.	✔ Kişi kesilip yeni bir arka planın üstüne konmuş: boş kare gerekmez.
+	Replace with Media	Medya ile Değiştir
+	Coming soon: separating a moving object from its background is being improved.	Yakında: hareket eden nesneyi arka planından ayırma geliştiriliyor.
+	Choose what takes its place	Yerine geçecek medyayı seçin
+	Cover the Object	Nesneyi Kapla
+	Fit Inside	İçine Sığdır
+	Blur what shows behind it	Arkada kalanı bulanıklaştır
+	Import a picture or video in Media first (a PNG with a transparent background looks best).	Önce Medya'ya bir resim veya video ekleyin (saydam arka planlı PNG en iyi sonucu verir).
+	✔ It follows the object and grows and shrinks with it	✔ Nesneyi izliyor, onunla birlikte büyüyüp küçülüyor
+	If you track further or move the box, press Use again.	Takibi uzatır ya da kutuyu taşırsanız Kullan'a yeniden basın.
+	Track first; then press Use. The proportions are kept as the object comes nearer or moves away.	Önce takip edin, sonra Kullan'a basın. Nesne yaklaşıp uzaklaşırken en boy oranı korunur.
+	Tip: cut the person out first (Body Effects) and their shape lights up as they go; without it the picture flashes bright.	İpucu: önce kişiyi kesip çıkarırsanız (Vücut Efektleri) giderken bedeninin şekli parlar; kesip çıkarmadan görüntü parlayarak geçer.
+	Brush Titles	Fırça Başlıklar
+	Brush Stroke	Fırça Darbesi
+	Dry Brush	Kuru Fırça
+	Ink	Mürekkep
+	Royal Emblem	Kraliyet Arması
+	Folded Banner	Katlamalı Flama
+	Metal Plate	Metal Plaka
+	Torn Paper	Yırtık Kâğıt
+	Neon Panel	Neon Panel
+	Social Account	Sosyal Hesap
+	All Together	Hepsi Bir Arada
+	Subscribe and Like	Abone Ol ve Beğen
+	Facebook	Facebook
+	Instagram	Instagram
+	X	X
+	YouTube	YouTube
+	TikTok	TikTok
+	LinkedIn	LinkedIn
+	Telegram	Telegram
+	WhatsApp	WhatsApp
+	Website	Web Sitesi
+	E-mail	E-posta
+	A brush stroke with bristle marks at both ends and a smooth middle for the title. It grows with the text.	İki ucunda fırça izleri olan, ortası yazı için pürüzsüz fırça darbesi. Yazıyla birlikte uzar.
+	A navy plaque with a gold rim between two laurel branches.	İki defne dalı arasında altın kenarlı lacivert plaka.
+	A folded banner with swallow tails and two fine stripes.	Çatal uçlu, iki ince şeritli katlamalı flama.
+	A polished metal plate with a bevel, rivets and an engraved title.	Pahlı, perçinli, kazıma yazılı parlak metal plaka.
+	A torn strip of paper taped over a second one.	İkinci bir kâğıdın üzerine bantlanmış yırtık kâğıt şeridi.
+	A dark panel with a glowing two-colour edge and arrows.	İki renkli parlayan kenarı ve okları olan koyu panel.
+	Your address on a platform, with an icon. Switch the icon off to put a picture of your own there.	Bir platformdaki adresiniz, simgesiyle. Kendi resminizi koymak için simgeyi kapatabilirsiniz.
+	Five of your addresses in a column, arriving one after another.	Beş adresiniz alt alta, sırayla gelir.
+	A play badge with a subscribe and a like button; every word can be changed.	Oynat rozeti, abone ol ve beğen düğmeleri; bütün yazılar değiştirilebilir.
+	Brush Color	Fırça Rengi
+	Brush End Color	Fırça Bitiş Rengi
+	Second Stroke Color	İkinci Darbe Rengi
+	Second Stroke	İkinci Darbe
+	Plaque Color	Plaka Rengi
+	Plaque Shade	Plaka Gölge Rengi
+	Rim Color	Çerçeve Kenar Rengi
+	Rim Shade	Kenar Gölge Rengi
+	Left Branch Color	Sol Dal Rengi
+	Right Branch Color	Sağ Dal Rengi
+	Band Shade	Bant Gölge Rengi
+	Left Tail Color	Sol Uç Rengi
+	Right Tail Color	Sağ Uç Rengi
+	Stripe Color	Şerit Rengi
+	Plate Color	Plaka Yüzey Rengi
+	Plate Shade	Plaka Koyu Rengi
+	Shine	Parıldama
+	Shine Color	Parıldama Rengi
+	Paper Color	Kâğıt Rengi
+	Paper Shade	Kâğıt Gölge Rengi
+	Back Paper Color	Arka Kâğıt Rengi
+	Left Tape Color	Sol Bant Parçası Rengi
+	Right Tape Color	Sağ Bant Parçası Rengi
+	Edge End Color	Kenar Bitiş Rengi
+	Panel Color	Panel Rengi
+	Left Arrows Color	Sol Okların Rengi
+	Right Arrows Color	Sağ Okların Rengi
+	Address	Adres
+	Platform	Platform
+	Bar Shade	Çubuk Gölge Rengi
+	Badge Color	Rozet Rengi
+	Badge Shade	Rozet Gölge Rengi
+	Icon Color	Simge Rengi
+	Show Icon	Simgeyi Göster
+	Subscribe Text	Abone Ol Yazısı
+	Joining Word	Bağlaç
+	Like Text	Beğen Yazısı
+	Subscribe Button Color	Abone Ol Düğme Rengi
+	Like Button Color	Beğen Düğme Rengi
+	Joining Word Color	Bağlaç Zemin Rengi

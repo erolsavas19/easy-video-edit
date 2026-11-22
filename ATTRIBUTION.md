@@ -152,6 +152,8 @@ carry each font's licence as `OFL-<family>.txt`.
 
 Easy Video Edit ships no third-party brand marks: FilmCraft's ArtCraft marks (`docs/brand/` upstream) are removed in this fork, as FilmCraft's AGENTS.md §1.8 requires. Its own icon is listed under the app icons above.
 
+The brush, ornament and social account templates (`crates/project/src/kurgu_templates/extras.rs`) are original shapes computed in code (MIT OR Apache-2.0). The social cards name each platform in words beside a generic icon (people, photo, speech bubble, play triangle, phone, briefcase, globe, envelope); none reproduces a platform's logo.
+
 ## Third-party source code
 
 Source files that are transcribed from third-party code rather than written from scratch. Each keeps
